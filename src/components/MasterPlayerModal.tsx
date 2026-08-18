@@ -16,32 +16,37 @@ import {
 } from 'lucide-react';
 
 export const MasterPlayerModal: React.FC = () => {
-  const { isMasterPlayerOpen, setMasterPlayerOpen, scenes, projectName } = useStudioStore();
-  const completedScenes = scenes.filter((s) => s.status === 'completed' && s.outputVideoUrl);
+  const { isMasterPlayerOpen, setMasterPlayerOpen, sceneGroups, projectName } = useStudioStore();
+  
+  const completedShots = sceneGroups.flatMap((g) =>
+    g.shots
+      .filter((s) => s.status === 'completed' && s.outputVideoUrl)
+      .map((s) => ({ ...s, sceneName: g.name }))
+  );
 
-  const [currentSceneIndex, setCurrentSceneIndex] = useState(0);
+  const [currentShotIndex, setCurrentShotIndex] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
 
   useEffect(() => {
-    if (videoRef.current && completedScenes[currentSceneIndex]) {
-      videoRef.current.src = completedScenes[currentSceneIndex].outputVideoUrl || '';
+    if (videoRef.current && completedShots[currentShotIndex]) {
+      videoRef.current.src = completedShots[currentShotIndex].outputVideoUrl || '';
       if (isPlaying) {
         videoRef.current.play().catch(console.warn);
       }
     }
-  }, [currentSceneIndex, isMasterPlayerOpen]);
+  }, [currentShotIndex, isMasterPlayerOpen]);
 
   if (!isMasterPlayerOpen) return null;
 
-  const currentScene = completedScenes[currentSceneIndex];
+  const currentShot = completedShots[currentShotIndex];
 
   const handleVideoEnded = () => {
-    if (currentSceneIndex < completedScenes.length - 1) {
-      setCurrentSceneIndex((prev) => prev + 1);
+    if (currentShotIndex < completedShots.length - 1) {
+      setCurrentShotIndex((prev) => prev + 1);
     } else {
       setIsPlaying(false);
-      setCurrentSceneIndex(0);
+      setCurrentShotIndex(0);
     }
   };
 
@@ -56,141 +61,144 @@ export const MasterPlayerModal: React.FC = () => {
     }
   };
 
-  const downloadSceneVideo = (url: string, index: number) => {
+  const downloadShotVideo = (url: string, shotNumber: number, sceneName: string) => {
     const a = document.createElement('a');
     a.href = url;
-    a.download = `${projectName}_scene_${index + 1}.mp4`;
-    a.target = '_blank';
+    a.download = `${sceneName}_shot_${shotNumber}_seedance.mp4`;
     a.click();
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/90 backdrop-blur-md flex items-center justify-center p-6">
-      <div className="w-full max-w-4xl rounded-2xl bg-studio-900 border border-studio-700 shadow-2xl overflow-hidden flex flex-col max-h-[92vh]">
+    <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4">
+      <div className="w-full max-w-5xl rounded-3xl bg-studio-950 border border-studio-700 shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
         {/* Header */}
-        <div className="p-4 border-b border-studio-700 bg-studio-850 flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <div className="p-2 rounded-xl bg-studio-accent/20 text-studio-accent border border-studio-accent/30">
+        <div className="p-4 border-b border-studio-800 flex items-center justify-between bg-studio-900/80">
+          <div className="flex items-center gap-3">
+            <div className="p-2 rounded-xl bg-studio-accent/20 text-studio-cyan border border-studio-accent/30">
               <Film className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="text-base font-bold text-white">Мастер-Плеер Фильма: {projectName}</h2>
-              <p className="text-xs text-gray-400">
-                Бесшовный просмотр и экспорт готовых шотов ({completedScenes.length} из {scenes.length} готово)
-              </p>
+              <h3 className="text-base font-bold text-white flex items-center gap-2">
+                <span>Мастер-Плеер Проекта</span>
+                <span className="text-xs font-mono px-2 py-0.5 rounded-full bg-studio-800 text-studio-cyan border border-studio-700">
+                  {completedShots.length} готовых шотов
+                </span>
+              </h3>
+              <p className="text-xs text-gray-400">{projectName}</p>
             </div>
           </div>
           <button
-            onClick={() => {
-              setIsPlaying(false);
-              setMasterPlayerOpen(false);
-            }}
-            className="p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-studio-800 transition-colors"
+            type="button"
+            onClick={() => setMasterPlayerOpen(false)}
+            className="p-2 rounded-xl text-gray-400 hover:text-white hover:bg-studio-800 transition-colors"
           >
-            <X className="w-4 h-4" />
+            <X className="w-5 h-5" />
           </button>
         </div>
 
-        {/* Video Canvas & Controls */}
-        <div className="p-6 flex-1 flex flex-col items-center justify-center bg-black/60">
-          {completedScenes.length > 0 && currentScene ? (
-            <div className="w-full max-w-2xl space-y-4">
-              <div className="relative rounded-2xl overflow-hidden bg-black border border-studio-700 aspect-video shadow-2xl">
-                <video
-                  ref={videoRef}
-                  src={currentScene.outputVideoUrl}
-                  onEnded={handleVideoEnded}
-                  onPlay={() => setIsPlaying(true)}
-                  onPause={() => setIsPlaying(false)}
-                  playsInline
-                  className="w-full h-full object-contain"
-                />
-
-                {/* Scene Indicator Overlay */}
-                <div className="absolute top-3 left-3 px-3 py-1 rounded-lg bg-black/70 backdrop-blur-sm border border-white/10 text-xs font-mono font-bold text-studio-cyan">
-                  Шот #{currentScene.sceneNumber} / {scenes.length}
-                </div>
+        {/* Video Player */}
+        <div className="relative bg-black flex items-center justify-center min-h-[380px] max-h-[550px] overflow-hidden">
+          {completedShots.length > 0 && currentShot ? (
+            <>
+              <video
+                ref={videoRef}
+                controls
+                playsInline
+                onEnded={handleVideoEnded}
+                onPlay={() => setIsPlaying(true)}
+                onPause={() => setIsPlaying(false)}
+                className="max-h-[550px] w-auto max-w-full object-contain"
+              />
+              <div className="absolute top-4 left-4 bg-black/75 backdrop-blur-sm px-3 py-1.5 rounded-xl border border-studio-700/80 text-xs font-medium text-white flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-studio-emerald animate-pulse" />
+                <span>
+                  {currentShot.sceneName} • Шот #{currentShot.shotNumber} ({currentShot.duration}s • {currentShot.resolution})
+                </span>
               </div>
-
-              {/* Playback bar */}
-              <div className="flex items-center justify-between bg-studio-850 p-3 rounded-xl border border-studio-700">
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => setCurrentSceneIndex((prev) => Math.max(0, prev - 1))}
-                    disabled={currentSceneIndex === 0}
-                    className="p-2 rounded-lg text-gray-400 hover:text-white hover:bg-studio-800 disabled:opacity-30"
-                  >
-                    <SkipBack className="w-4 h-4" />
-                  </button>
-
-                  <button
-                    onClick={togglePlay}
-                    className="p-2.5 rounded-xl bg-studio-accent hover:bg-purple-600 text-white shadow-md shadow-studio-accent/20"
-                  >
-                    {isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
-                  </button>
-
-                  <button
-                    onClick={() =>
-                      setCurrentSceneIndex((prev) =>
-                        Math.min(completedScenes.length - 1, prev + 1)
-                      )
-                    }
-                    disabled={currentSceneIndex === completedScenes.length - 1}
-                    className="p-2 rounded-lg text-gray-400 hover:text-white hover:bg-studio-800 disabled:opacity-30"
-                  >
-                    <SkipForward className="w-4 h-4" />
-                  </button>
-
-                  <span className="text-xs font-mono text-gray-300 ml-2">
-                    {currentScene.title} ({currentScene.duration}s)
-                  </span>
-                </div>
-
-                <button
-                  onClick={() =>
-                    currentScene.outputVideoUrl &&
-                    downloadSceneVideo(currentScene.outputVideoUrl, currentSceneIndex)
-                  }
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-studio-800 hover:bg-studio-700 text-xs font-semibold text-gray-200 border border-studio-700 transition-colors"
-                >
-                  <Download className="w-3.5 h-3.5" />
-                  <span>Скачать MP4 шота #{currentScene.sceneNumber}</span>
-                </button>
-              </div>
-            </div>
+            </>
           ) : (
-            <div className="text-center p-8 space-y-2">
-              <Film className="w-12 h-12 text-gray-600 mx-auto" />
-              <p className="text-sm font-semibold text-gray-400">Нет готовых сцен для воспроизведения</p>
-              <p className="text-xs text-gray-600">Сгенерируйте хотя бы одну сцену в таймлайне</p>
+            <div className="text-center p-8 space-y-3">
+              <Layers className="w-12 h-12 text-gray-600 mx-auto" />
+              <p className="text-sm font-semibold text-gray-400">
+                В проекте пока нет сгенерированных шотов
+              </p>
+              <p className="text-xs text-gray-500 max-w-md">
+                Нажмите «Сгенерировать шот» или «Сквозной рендер сцены», чтобы видео появилось здесь
+              </p>
             </div>
           )}
         </div>
 
-        {/* Scene Playlist Strip */}
-        <div className="p-4 border-t border-studio-700 bg-studio-850 overflow-x-auto">
-          <div className="flex items-center gap-3">
-            {completedScenes.map((s, idx) => (
-              <button
-                key={s.id}
-                onClick={() => {
-                  setCurrentSceneIndex(idx);
-                  setIsPlaying(true);
-                }}
-                className={`flex items-center gap-2 px-3 py-2 rounded-xl border text-xs font-medium shrink-0 transition-all ${
-                  currentSceneIndex === idx
-                    ? 'bg-studio-accent/20 border-studio-accent text-white'
-                    : 'bg-studio-900 border-studio-700 text-gray-400 hover:text-gray-200'
-                }`}
-              >
-                <div className="w-2 h-2 rounded-full bg-studio-emerald" />
-                <span>Шот #{s.sceneNumber}</span>
-                <span className="font-mono text-[10px] text-gray-500">({s.duration}s)</span>
-              </button>
-            ))}
+        {/* Timeline Strip of Completed Shots */}
+        {completedShots.length > 0 && (
+          <div className="p-4 bg-studio-900 border-t border-studio-800 space-y-3">
+            <div className="flex items-center justify-between text-xs text-gray-400">
+              <span className="font-semibold uppercase tracking-wider">Последовательность шотов</span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  disabled={currentShotIndex === 0}
+                  onClick={() => setCurrentShotIndex((prev) => Math.max(0, prev - 1))}
+                  className="p-1 rounded-lg bg-studio-800 hover:bg-studio-700 disabled:opacity-40"
+                >
+                  <SkipBack className="w-4 h-4 text-white" />
+                </button>
+                <button
+                  type="button"
+                  onClick={togglePlay}
+                  className="px-3 py-1 rounded-lg bg-studio-cyan text-studio-950 font-bold hover:bg-cyan-300"
+                >
+                  {isPlaying ? 'Пауза' : 'Воспроизвести все'}
+                </button>
+                <button
+                  type="button"
+                  disabled={currentShotIndex === completedShots.length - 1}
+                  onClick={() => setCurrentShotIndex((prev) => Math.min(completedShots.length - 1, prev + 1))}
+                  className="p-1 rounded-lg bg-studio-800 hover:bg-studio-700 disabled:opacity-40"
+                >
+                  <SkipForward className="w-4 h-4 text-white" />
+                </button>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 overflow-x-auto pb-1 custom-scrollbar">
+              {completedShots.map((s, idx) => (
+                <div
+                  key={s.id}
+                  onClick={() => setCurrentShotIndex(idx)}
+                  className={`flex items-center gap-2 p-2 rounded-xl border cursor-pointer shrink-0 transition-all ${
+                    idx === currentShotIndex
+                      ? 'bg-studio-accent/25 border-studio-accent ring-1 ring-studio-accent'
+                      : 'bg-studio-850 hover:bg-studio-800 border-studio-750'
+                  }`}
+                >
+                  <div className="w-10 h-7 rounded bg-black overflow-hidden border border-studio-700 shrink-0">
+                    {s.outputVideoUrl && (
+                      <video src={s.outputVideoUrl} className="w-full h-full object-cover" />
+                    )}
+                  </div>
+                  <div className="text-left">
+                    <p className="text-[11px] font-bold text-white truncate max-w-[110px]">
+                      {s.sceneName} #{s.shotNumber}
+                    </p>
+                    <p className="text-[9px] text-gray-400 font-mono">{s.duration}s • {s.resolution}</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      downloadShotVideo(s.outputVideoUrl!, s.shotNumber, s.sceneName);
+                    }}
+                    className="p-1 text-gray-400 hover:text-studio-cyan"
+                    title="Скачать этот шот"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              ))}
+            </div>
           </div>
-        </div>
+        )}
       </div>
     </div>
   );

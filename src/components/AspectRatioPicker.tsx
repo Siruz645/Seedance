@@ -10,28 +10,31 @@ interface Props {
 }
 
 const RATIOS: { id: AspectRatio; label: string; ratioName: string; width: number; height: number }[] = [
-  { id: '16:9', label: '16:9 Широкоэкранный', ratioName: '16:9', width: 68, height: 38 },
-  { id: '9:16', label: '9:16 Вертикальный', ratioName: '9:16', width: 38, height: 68 },
-  { id: '1:1', label: '1:1 Квадрат', ratioName: '1:1', width: 50, height: 50 },
-  { id: '4:3', label: '4:3 Классический ТВ', ratioName: '4:3', width: 58, height: 44 },
-  { id: '3:4', label: '3:4 Вертикальный портрет', ratioName: '3:4', width: 44, height: 58 },
-  { id: '21:9', label: '21:9 Кинематографический', ratioName: '21:9', width: 78, height: 33 },
-  { id: '9:21', label: '9:21 Ультравертикальный', ratioName: '9:21', width: 33, height: 78 },
-  { id: '3:2', label: '3:2 Фотоформат', ratioName: '3:2', width: 60, height: 40 },
-  { id: '2:3', label: '2:3 Высокий кадр', ratioName: '2:3', width: 40, height: 60 },
-  { id: 'auto', label: 'Auto (По референсу)', ratioName: 'Auto', width: 60, height: 40 },
+  { id: 'auto', label: 'Auto (По референсу)', ratioName: 'Auto', width: 48, height: 32 },
+  { id: '16:9', label: '16:9 Горизонт', ratioName: '16:9', width: 56, height: 32 },
+  { id: '9:16', label: '9:16 Вертикал', ratioName: '9:16', width: 32, height: 56 },
+  { id: '1:1', label: '1:1 Квадрат', ratioName: '1:1', width: 42, height: 42 },
+  { id: '4:3', label: '4:3 ТВ', ratioName: '4:3', width: 48, height: 36 },
+  { id: '3:4', label: '3:4 Портрет', ratioName: '3:4', width: 36, height: 48 },
+  { id: '21:9', label: '21:9 Кино', ratioName: '21:9', width: 64, height: 28 },
+  { id: '9:21', label: '9:21 Ультра', ratioName: '9:21', width: 28, height: 64 },
+  { id: '3:2', label: '3:2 Фото', ratioName: '3:2', width: 50, height: 34 },
+  { id: '2:3', label: '2:3 Высокий', ratioName: '2:3', width: 34, height: 50 },
 ];
 
 export const AspectRatioPicker: React.FC<Props> = ({ value, onChange }) => {
   const [isOpen, setIsOpen] = useState(false);
+  const [hoveredItem, setHoveredItem] = useState<(typeof RATIOS)[0] | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const activeRatio = RATIOS.find((r) => r.id === value) || RATIOS[0];
+  const displayedRatio = hoveredItem || activeRatio;
 
   // Close when clicking outside
   useEffect(() => {
     const handleOutsideClick = (e: MouseEvent) => {
       if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
         setIsOpen(false);
+        setHoveredItem(null);
       }
     };
     if (isOpen) {
@@ -46,7 +49,7 @@ export const AspectRatioPicker: React.FC<Props> = ({ value, onChange }) => {
       <button
         type="button"
         onClick={() => setIsOpen(!isOpen)}
-        className="flex items-center gap-2 px-3 py-2 rounded-xl bg-studio-850 hover:bg-studio-800 border border-studio-700 hover:border-studio-600 text-xs text-gray-200 transition-colors w-full justify-between shadow-sm"
+        className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-studio-900 hover:bg-studio-850 border border-studio-750 hover:border-studio-600 text-xs text-gray-200 transition-colors w-full justify-between shadow-sm cursor-pointer"
       >
         <span className="flex items-center gap-2 font-medium truncate">
           <Ratio className="w-3.5 h-3.5 text-studio-cyan shrink-0" />
@@ -56,92 +59,100 @@ export const AspectRatioPicker: React.FC<Props> = ({ value, onChange }) => {
           </span>
         </span>
         {isOpen ? (
-          <ChevronUp className="w-4 h-4 text-gray-400 shrink-0" />
+          <ChevronUp className="w-3.5 h-3.5 text-gray-400 shrink-0" />
         ) : (
-          <ChevronDown className="w-4 h-4 text-gray-400 shrink-0" />
+          <ChevronDown className="w-3.5 h-3.5 text-gray-400 shrink-0" />
         )}
       </button>
 
-      {/* Floating Wide Popover Dropdown on Top */}
+      {/* Floating Dropdown opening DOWNWARDS underneath button */}
       {isOpen && (
-        <div className="absolute top-full left-0 mt-2 z-50 w-[420px] rounded-2xl bg-studio-950/98 backdrop-blur-xl border border-studio-650 shadow-2xl p-4 space-y-3 animate-in fade-in zoom-in-95 duration-150 ring-1 ring-white/10">
-          <div className="flex items-center justify-between border-b border-studio-750 pb-2">
-            <span className="text-xs font-bold text-gray-200 flex items-center gap-2">
-              <Ratio className="w-4 h-4 text-studio-cyan" />
-              <span>Выбор пропорции кадра</span>
-            </span>
+        <div className="absolute top-full mt-1.5 right-0 z-50 w-72 rounded-xl bg-studio-950/98 backdrop-blur-xl border border-studio-650 shadow-2xl p-3 space-y-2.5 animate-in fade-in zoom-in-95 duration-100 ring-1 ring-white/10">
+          {/* Header with Live Preview */}
+          <div className="flex items-center justify-between border-b border-studio-800 pb-1.5">
+            <div className="flex items-center gap-1.5 text-xs font-bold text-gray-200">
+              <Ratio className="w-3.5 h-3.5 text-studio-cyan" />
+              <span>Пропорции кадра</span>
+            </div>
             <button
               type="button"
-              onClick={() => setIsOpen(false)}
-              className="p-1 rounded-md text-gray-400 hover:text-white hover:bg-studio-800 transition-colors"
+              onClick={() => {
+                setIsOpen(false);
+                setHoveredItem(null);
+              }}
+              className="p-1 rounded-md text-gray-400 hover:text-white hover:bg-studio-850 transition-colors"
             >
               <X className="w-3.5 h-3.5" />
             </button>
           </div>
 
-          <div className="flex gap-4">
-            {/* Left: Visual Frame Box Preview */}
-            <div className="w-36 h-40 rounded-xl bg-studio-900 border border-studio-750 p-2.5 flex flex-col items-center justify-between shrink-0 relative overflow-hidden shadow-inner">
-              {/* 3x3 grid */}
-              <div className="absolute inset-0 grid grid-cols-3 grid-rows-3 pointer-events-none opacity-20">
-                <div className="border-r border-b border-white" />
-                <div className="border-r border-b border-white" />
-                <div className="border-b border-white" />
-                <div className="border-r border-b border-white" />
-                <div className="border-r border-b border-white" />
-                <div className="border-b border-white" />
-                <div className="border-r border-white" />
-                <div className="border-r border-white" />
-                <div />
-              </div>
+          {/* Top Live Hover Visual Box */}
+          <div className="h-20 rounded-lg bg-studio-900 border border-studio-750 p-2 flex items-center justify-center relative overflow-hidden shadow-inner">
+            {/* 3x3 grid guide lines */}
+            <div className="absolute inset-0 grid grid-cols-3 grid-rows-3 pointer-events-none opacity-15">
+              <div className="border-r border-b border-white" />
+              <div className="border-r border-b border-white" />
+              <div className="border-b border-white" />
+              <div className="border-r border-b border-white" />
+              <div className="border-r border-b border-white" />
+              <div className="border-b border-white" />
+              <div className="border-r border-white" />
+              <div className="border-r border-white" />
+              <div />
+            </div>
 
-              {/* Dynamic Frame Box */}
-              <div className="flex-1 w-full flex items-center justify-center relative z-10">
-                <div
-                  style={{
-                    width: `${activeRatio.width}px`,
-                    height: `${activeRatio.height}px`,
-                  }}
-                  className="border-2 border-white rounded shadow-lg transition-all duration-300 bg-white/10"
-                />
-              </div>
-
-              <span className="text-[10px] font-bold text-studio-cyan relative z-10 truncate text-center w-full">
-                {activeRatio.label}
+            {/* Dynamic Animated Frame */}
+            <div
+              style={{
+                width: `${displayedRatio.width}px`,
+                height: `${displayedRatio.height}px`,
+              }}
+              className="border-2 border-studio-cyan rounded shadow-md transition-all duration-150 bg-studio-cyan/25 flex items-center justify-center relative z-10"
+            >
+              <span className="text-[9px] font-mono font-bold text-white drop-shadow">
+                {displayedRatio.ratioName}
               </span>
             </div>
+          </div>
 
-            {/* Right: Wide List without clipping */}
-            <div className="flex-1 space-y-1 overflow-y-auto max-h-40 pr-1.5 custom-scrollbar">
-              {RATIOS.map((item) => {
-                const isSelected = item.id === value;
-                return (
-                  <button
-                    key={item.id}
-                    type="button"
-                    onClick={() => {
-                      onChange(item.id);
-                      setIsOpen(false);
-                    }}
-                    className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs transition-colors text-left ${
-                      isSelected
-                        ? 'bg-studio-accent/25 text-white font-bold border border-studio-accent shadow-sm'
-                        : 'text-gray-300 hover:bg-studio-850 hover:text-white border border-transparent'
-                    }`}
-                  >
-                    <div className="flex items-center gap-2.5 min-w-0">
-                      <span className="font-mono text-studio-cyan font-bold w-10 shrink-0">
-                        {item.ratioName}
-                      </span>
-                      <span className="text-gray-200 text-xs truncate">
-                        {item.label.replace(item.ratioName, '').trim()}
-                      </span>
-                    </div>
-                    {isSelected && <Check className="w-4 h-4 text-studio-emerald shrink-0 ml-2" />}
-                  </button>
-                );
-              })}
-            </div>
+          {/* 2-Column Grid with all 10 aspect ratios directly visible */}
+          <div
+            className="grid grid-cols-2 gap-1"
+            onMouseLeave={() => setHoveredItem(null)}
+          >
+            {RATIOS.map((item) => {
+              const isSelected = item.id === value;
+              const isHovered = hoveredItem?.id === item.id;
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  onMouseEnter={() => setHoveredItem(item)}
+                  onClick={() => {
+                    onChange(item.id);
+                    setIsOpen(false);
+                    setHoveredItem(null);
+                  }}
+                  className={`flex items-center justify-between px-2 py-1.5 rounded-lg text-xs transition-all text-left ${
+                    isSelected
+                      ? 'bg-studio-accent/25 text-white font-bold border border-studio-accent shadow-sm'
+                      : isHovered
+                      ? 'bg-studio-850 text-white border border-studio-700'
+                      : 'text-gray-300 hover:bg-studio-850 hover:text-white border border-transparent'
+                  }`}
+                >
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <span className="font-mono text-studio-cyan font-bold text-[11px] shrink-0">
+                      {item.ratioName}
+                    </span>
+                    <span className="text-gray-300 text-[10px] truncate">
+                      {item.label.replace(item.ratioName, '').trim()}
+                    </span>
+                  </div>
+                  {isSelected && <Check className="w-3 h-3 text-studio-emerald shrink-0" />}
+                </button>
+              );
+            })}
           </div>
         </div>
       )}

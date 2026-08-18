@@ -49,17 +49,20 @@ export interface MediaReference {
   type: 'image' | 'video' | 'audio';
   role: MediaRole;
   url: string; // Data URL or external URL
+  originalUrl?: string; // Original URL before noise was applied
+  hasNoise?: boolean;
   fileSizeBytes?: number;
   isInheritedFromPrevious?: boolean;
 }
 
-export type SceneStatus = 'draft' | 'ready' | 'rendering' | 'completed' | 'error';
+export type ShotStatus = 'draft' | 'ready' | 'rendering' | 'completed' | 'failed' | 'error';
+export type SceneStatus = ShotStatus; // Backwards compatibility
 
 export type StartFrameSourceMode = 'previous_scene' | 'custom_scene' | 'manual_upload' | 'none';
 
-export interface Scene {
+export interface Shot {
   id: string;
-  sceneNumber: number;
+  shotNumber: number; // 1, 2, 3...
   title: string;
   model: SeedanceModelId;
   prompt: string;
@@ -78,13 +81,13 @@ export interface Scene {
   
   // Keyframe inheritance options
   startFrameSourceMode: StartFrameSourceMode;
-  startFrameSourceSceneNumber?: number; // E.g. inherit from scene #1
+  startFrameSourceSceneNumber?: number; // E.g. inherit from shot #1
   manualStartFrameOverride?: string; // Data URL
   applyAntiFilterNoise?: boolean; // Anti-censorship film grain bypass (for real-person moderation guard)
-  noiseStrength?: number; // 0.1 to 1.0 (default 0.45)
+  noiseStrength?: number; // 0.1 to 1.0 (default 0.5)
   
   // Output & Execution
-  status: SceneStatus;
+  status: ShotStatus;
   progress: number; // 0 - 100
   jobId?: string;
   pollingUrl?: string;
@@ -96,33 +99,52 @@ export interface Scene {
   completedAt?: number;
 }
 
+// Aliased for backward compatibility
+export type Scene = Shot;
+
+// SceneGroup: Container / Episode package representing a scene with multiple sequential shots
+export interface SceneGroup {
+  id: string;
+  sceneNumber: number; // 1, 2, 3...
+  name: string; // e.g. "Сцена 1: Склад"
+  shots: Shot[];
+  defaultSettings?: {
+    model: SeedanceModelId;
+    duration: number;
+    resolution: Resolution;
+    aspectRatio: AspectRatio;
+    fps: FrameRate;
+    generateAudio: boolean;
+  };
+}
+
 export interface StudioSettings {
   openRouterApiKey: string;
-  selectedLlmModel: string;
-  defaultSeedanceModel: SeedanceModelId;
-  zeroDataRetention: boolean;
-  autoCascadeRender: boolean;
-  enableAiDirector: boolean;
-  defaultAspectRatio: AspectRatio;
-  defaultResolution: Resolution;
-  defaultDuration: number;
-  appTitle: string;
+  selectedLlmModel?: string;
+  defaultModel?: SeedanceModelId;
+  defaultAspectRatio?: AspectRatio;
+  defaultResolution?: Resolution;
+  defaultDuration?: number;
+  defaultFps?: FrameRate;
+  enableAiDirector?: boolean;
+  autoExtractLastFrame?: boolean;
+  zeroDataRetention?: boolean;
+  directorModel?: string;
+}
+
+export interface DirectorSuggestion {
+  enhancedPrompt: string;
+  somaticDetails: string[];
+  cameraTrajectorySuggestion: CameraMotion;
+  recommendedDuration: number;
+  lightingCue: string;
 }
 
 export interface LogEntry {
   id: string;
   timestamp: string;
   level: 'info' | 'success' | 'warn' | 'error';
-  category: 'API' | 'RENDER' | 'POLLING' | 'CANVAS' | 'SETTINGS';
+  category: 'API' | 'RENDER' | 'FRAME' | 'DIRECTOR' | 'SETTINGS' | 'CANVAS';
   message: string;
   details?: any;
-}
-
-export interface ProjectData {
-  version: string;
-  projectName: string;
-  createdAt: number;
-  updatedAt: number;
-  settings: StudioSettings;
-  scenes: Scene[];
 }

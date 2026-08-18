@@ -15,6 +15,7 @@ import {
   Copy,
   Check,
   ZoomIn,
+  Undo2,
 } from 'lucide-react';
 
 interface Props {
@@ -23,13 +24,15 @@ interface Props {
   onRemoveReference: (refId: string) => void;
   onUpdateRole: (refId: string, role: MediaRole) => void;
   onUpdateUrl?: (refId: string, url: string) => void;
+  onUpdateData?: (refId: string, data: Partial<MediaReference>) => void;
   inheritedStartFrameUrl?: string;
+  hasExistingStartFrame?: boolean;
 }
 
 const ALL_ROLES: { id: MediaRole; label: string; badgeColor: string; mediaType: 'image' | 'video' | 'audio' }[] = [
   { id: 'image_ref', label: '📌 Референс (Персонаж / Стиль / Объект)', badgeColor: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40', mediaType: 'image' },
   { id: 'start_frame', label: '🎬 Начальный кадр (Start Frame)', badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40', mediaType: 'image' },
-  { id: 'end_frame', label: '🏁 Конечный кадр (End Frame ➔ След. сцена)', badgeColor: 'bg-purple-500/20 text-purple-300 border-purple-500/40', mediaType: 'image' },
+  { id: 'end_frame', label: '🏁 Конечный кадр (End Frame)', badgeColor: 'bg-purple-500/20 text-purple-300 border-purple-500/40', mediaType: 'image' },
   { id: 'video_motion', label: '🎞️ Видео движения (V2V Motion Ref)', badgeColor: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/40', mediaType: 'video' },
   { id: 'audio_input', label: '🎵 Аудио-дорожка (Речь / SFX / Lip-Sync)', badgeColor: 'bg-rose-500/20 text-rose-300 border-rose-500/40', mediaType: 'audio' },
 ];
@@ -40,7 +43,9 @@ export const MediaDropzone: React.FC<Props> = ({
   onRemoveReference,
   onUpdateRole,
   onUpdateUrl,
+  onUpdateData,
   inheritedStartFrameUrl,
+  hasExistingStartFrame,
 }) => {
   const [isDragging, setIsDragging] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
@@ -58,7 +63,10 @@ export const MediaDropzone: React.FC<Props> = ({
 
     if (isImg) {
       mediaType = 'image';
-      const hasStart = references.some((r) => r.role === 'start_frame');
+      const hasStart =
+        references.some((r) => r.role === 'start_frame') ||
+        !!hasExistingStartFrame ||
+        !!inheritedStartFrameUrl;
       defaultRole = hasStart ? 'image_ref' : 'start_frame';
 
       try {
@@ -68,6 +76,8 @@ export const MediaDropzone: React.FC<Props> = ({
           type: 'image',
           role: defaultRole,
           url: optimizedUrl,
+          originalUrl: optimizedUrl,
+          hasNoise: false,
           fileSizeBytes: file.size,
         });
         return;
@@ -91,6 +101,8 @@ export const MediaDropzone: React.FC<Props> = ({
           type: mediaType,
           role: defaultRole,
           url,
+          originalUrl: url,
+          hasNoise: false,
           fileSizeBytes: file.size,
         });
       }
@@ -118,17 +130,38 @@ export const MediaDropzone: React.FC<Props> = ({
     setTimeout(() => setCopiedId(null), 1800);
   };
 
-  const handleApplyNoise = async (ref: MediaReference) => {
-    if (ref.type !== 'image' || !onUpdateUrl) return;
+  // Toggle noise with undo/restore capability
+  const handleToggleNoise = async (ref: MediaReference) => {
+    if (ref.type !== 'image') return;
     setApplyingNoiseId(ref.id);
+
     try {
-      const noisyUrl = await applyNoiseToImage(ref.url, 0.5);
-      onUpdateUrl(ref.id, noisyUrl);
-      if (previewData && previewData.refId === ref.id) {
-        setPreviewData({ ...previewData, url: noisyUrl });
+      if (ref.hasNoise) {
+        // Undo / Restore original clean image
+        const restoredUrl = ref.originalUrl || ref.url;
+        if (onUpdateData) {
+          onUpdateData(ref.id, { url: restoredUrl, hasNoise: false });
+        } else if (onUpdateUrl) {
+          onUpdateUrl(ref.id, restoredUrl);
+        }
+        if (previewData && previewData.refId === ref.id) {
+          setPreviewData({ ...previewData, url: restoredUrl });
+        }
+      } else {
+        // Apply noise filter
+        const originalBase = ref.originalUrl || ref.url;
+        const noisyUrl = await applyNoiseToImage(originalBase, 0.5);
+        if (onUpdateData) {
+          onUpdateData(ref.id, { url: noisyUrl, originalUrl: originalBase, hasNoise: true });
+        } else if (onUpdateUrl) {
+          onUpdateUrl(ref.id, noisyUrl);
+        }
+        if (previewData && previewData.refId === ref.id) {
+          setPreviewData({ ...previewData, url: noisyUrl });
+        }
       }
     } catch (e) {
-      console.warn('Could not apply noise:', e);
+      console.warn('Could not toggle noise:', e);
     } finally {
       setApplyingNoiseId(null);
     }
@@ -137,7 +170,7 @@ export const MediaDropzone: React.FC<Props> = ({
   let imageIndexCounter = 0;
 
   return (
-    <div className="space-y-2">
+    <div className="space-y-2.5">
       {/* Drop Zone Box */}
       <div
         onDragOver={(e) => {
@@ -172,9 +205,9 @@ export const MediaDropzone: React.FC<Props> = ({
         </p>
       </div>
 
-      {/* References Grid / List */}
+      {/* References List — 1 reference per full-width row */}
       {references.length > 0 && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+        <div className="flex flex-col gap-2">
           {references.map((ref) => {
             const roleMeta = ALL_ROLES.find((r) => r.id === ref.role) || ALL_ROLES[0];
             const availableRolesForType = ALL_ROLES.filter((r) => r.mediaType === ref.type);
@@ -190,53 +223,60 @@ export const MediaDropzone: React.FC<Props> = ({
             }
 
             const isThisCopied = copiedId === ref.id;
+            const isApplyingNoise = applyingNoiseId === ref.id;
 
             return (
               <div
                 key={ref.id}
-                className="flex items-center gap-2.5 p-2 rounded-xl bg-studio-850 border border-studio-750 hover:border-studio-650 transition-all group"
+                className="flex items-center gap-3 p-2.5 rounded-xl bg-studio-850 border border-studio-750 hover:border-studio-650 transition-all shadow-sm"
               >
-                {/* Media Thumbnail with Click-to-Preview Lightbox */}
+                {/* Large Media Thumbnail (w-16 h-16) with Click-to-Preview */}
                 <div
                   onClick={() => {
                     if (ref.type === 'image') {
-                      setPreviewData({ url: ref.url, title: `${ref.name} ${promptTag ? `(${promptTag})` : ''}`, refId: ref.id });
+                      setPreviewData({
+                        url: ref.url,
+                        title: `${ref.name} ${promptTag ? `(${promptTag})` : ''}`,
+                        refId: ref.id,
+                      });
                     }
                   }}
-                  className={`w-12 h-12 rounded-lg bg-studio-900 overflow-hidden border border-studio-700 shrink-0 relative flex items-center justify-center ${
-                    ref.type === 'image' ? 'cursor-pointer hover:border-studio-cyan hover:scale-[1.02] transition-transform' : ''
+                  className={`w-16 h-16 rounded-xl bg-studio-900 overflow-hidden border border-studio-700 shrink-0 relative flex items-center justify-center ${
+                    ref.type === 'image'
+                      ? 'cursor-pointer hover:border-studio-cyan hover:scale-[1.02] transition-transform'
+                      : ''
                   }`}
-                  title={ref.type === 'image' ? 'Нажмите для предпросмотра изображения' : ref.name}
+                  title={ref.type === 'image' ? 'Кликните для предпросмотра' : ref.name}
                 >
                   {ref.type === 'image' && (
                     <>
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img src={ref.url} alt={ref.name} className="w-full h-full object-cover" />
-                      <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
-                        <ZoomIn className="w-3.5 h-3.5 text-white" />
+                      <div className="absolute inset-0 bg-black/35 opacity-0 hover:opacity-100 flex items-center justify-center transition-opacity">
+                        <ZoomIn className="w-4 h-4 text-white" />
                       </div>
                     </>
                   )}
-                  {ref.type === 'audio' && <Music className="w-5 h-5 text-rose-400" />}
-                  {ref.type === 'video' && <VideoIcon className="w-5 h-5 text-indigo-400" />}
+                  {ref.type === 'audio' && <Music className="w-6 h-6 text-rose-400" />}
+                  {ref.type === 'video' && <VideoIcon className="w-6 h-6 text-indigo-400" />}
 
                   {/* Tag badge overlay */}
                   {promptTag && (
-                    <span className="absolute bottom-0 inset-x-0 bg-black/85 text-[8px] font-mono text-center text-studio-cyan font-bold py-0.2">
+                    <span className="absolute bottom-0 inset-x-0 bg-black/85 text-[9px] font-mono text-center text-studio-cyan font-bold py-0.5">
                       {promptTag}
                     </span>
                   )}
                 </div>
 
-                {/* Info & Role Select */}
-                <div className="flex-1 min-w-0 space-y-1">
-                  <div className="flex items-center justify-between gap-1">
-                    <p className="text-[11px] font-semibold text-gray-200 truncate" title={ref.name}>
+                {/* Info & Actions */}
+                <div className="flex-1 min-w-0 space-y-1.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-xs font-bold text-gray-200 truncate" title={ref.name}>
                       {ref.name}
                     </p>
 
-                    <div className="flex items-center gap-1">
-                      {/* Icon-only Copy Tag Button */}
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      {/* Copy Tag Button */}
                       {promptTag && (
                         <button
                           type="button"
@@ -244,41 +284,54 @@ export const MediaDropzone: React.FC<Props> = ({
                             e.stopPropagation();
                             handleCopyTag(promptTag, ref.id);
                           }}
-                          className="p-1 rounded-md bg-studio-800 hover:bg-studio-750 text-gray-300 hover:text-white border border-studio-700 hover:border-studio-500 transition-colors flex items-center justify-center shrink-0"
-                          title={`Скопировать тег ${promptTag} для промпта`}
+                          className="p-1.5 rounded-lg bg-studio-800 hover:bg-studio-750 text-gray-300 hover:text-white border border-studio-700 hover:border-studio-500 transition-colors flex items-center gap-1 text-[11px] font-mono font-bold"
+                          title={`Скопировать тег ${promptTag} для вставки в промпт`}
                         >
                           {isThisCopied ? (
-                            <Check className="w-3 h-3 text-emerald-400" />
+                            <Check className="w-3.5 h-3.5 text-studio-emerald" />
                           ) : (
-                            <Copy className="w-3 h-3 text-studio-cyan" />
+                            <Copy className="w-3.5 h-3.5 text-studio-cyan" />
+                          )}
+                          <span className="text-[10px]">{isThisCopied ? 'Скопировано' : promptTag}</span>
+                        </button>
+                      )}
+
+                      {/* Noise Toggle Button with Undo/Restore */}
+                      {ref.type === 'image' && (
+                        <button
+                          type="button"
+                          disabled={isApplyingNoise}
+                          onClick={() => handleToggleNoise(ref)}
+                          className={`px-2 py-1.5 rounded-lg text-[10px] font-bold border flex items-center gap-1 transition-all ${
+                            ref.hasNoise
+                              ? 'bg-amber-500/20 text-amber-300 border-amber-500/50 hover:bg-amber-500/30'
+                              : 'bg-studio-800 text-gray-300 hover:text-white border-studio-700 hover:border-studio-600'
+                          }`}
+                          title={
+                            ref.hasNoise
+                              ? 'Шум наложен. Нажмите, чтобы ОТМЕНИТЬ и вернуть чистый оригинал'
+                              : 'Наложить 50% шум для обхода фильтра цензуры'
+                          }
+                        >
+                          {ref.hasNoise ? (
+                            <>
+                              <Undo2 className="w-3 h-3 text-amber-400" />
+                              <span>Шум: ВКЛ (Отменить)</span>
+                            </>
+                          ) : (
+                            <>
+                              <Sparkles className="w-3 h-3 text-studio-cyan" />
+                              <span>+ Шум 50%</span>
+                            </>
                           )}
                         </button>
                       )}
 
-                      {/* Anti-detect noise button */}
-                      {ref.type === 'image' && onUpdateUrl && (
-                        <button
-                          type="button"
-                          disabled={applyingNoiseId === ref.id}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleApplyNoise(ref);
-                          }}
-                          className="px-1.5 py-0.5 rounded bg-amber-500/15 hover:bg-amber-500/25 text-[10px] text-amber-300 border border-amber-500/30 transition-colors flex items-center gap-1 shrink-0 font-medium"
-                          title="Наложить анти-детект шум (50%) для обхода цензора ByteDance Real Person"
-                        >
-                          <Sparkles className="w-2.5 h-2.5" />
-                          <span>{applyingNoiseId === ref.id ? '...' : 'Шум'}</span>
-                        </button>
-                      )}
-
+                      {/* Delete Button */}
                       <button
                         type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onRemoveReference(ref.id);
-                        }}
-                        className="p-0.5 rounded text-gray-400 hover:text-rose-400 transition-colors"
+                        onClick={() => onRemoveReference(ref.id)}
+                        className="p-1.5 rounded-lg text-gray-400 hover:text-rose-400 hover:bg-studio-800 transition-colors"
                         title="Удалить референс"
                       >
                         <X className="w-3.5 h-3.5" />
@@ -286,15 +339,14 @@ export const MediaDropzone: React.FC<Props> = ({
                     </div>
                   </div>
 
-                  {/* Role dropdown strictly filtered by media type */}
+                  {/* Role Selector */}
                   <select
                     value={ref.role}
                     onChange={(e) => onUpdateRole(ref.id, e.target.value as MediaRole)}
-                    onClick={(e) => e.stopPropagation()}
-                    className={`w-full text-[10px] font-medium py-1 px-1.5 rounded-md border focus:outline-none cursor-pointer ${roleMeta.badgeColor}`}
+                    className="w-full bg-studio-900 text-gray-200 text-[11px] font-medium rounded-lg px-2.5 py-1 border border-studio-750 focus:outline-none focus:border-studio-cyan cursor-pointer"
                   >
                     {availableRolesForType.map((r) => (
-                      <option key={r.id} value={r.id} className="bg-studio-900 text-gray-200">
+                      <option key={r.id} value={r.id} className="bg-studio-950 text-white">
                         {r.label}
                       </option>
                     ))}
@@ -306,23 +358,13 @@ export const MediaDropzone: React.FC<Props> = ({
         </div>
       )}
 
-      {/* Lightbox Image Preview Modal */}
+      {/* Lightbox Preview */}
       {previewData && (
         <ImagePreviewModal
           isOpen={!!previewData}
           imageUrl={previewData.url}
           title={previewData.title}
           onClose={() => setPreviewData(null)}
-          onApplyNoise={
-            previewData.refId && onUpdateUrl
-              ? (noisyUrl) => {
-                  if (previewData.refId) {
-                    onUpdateUrl(previewData.refId, noisyUrl);
-                    setPreviewData({ ...previewData, url: noisyUrl });
-                  }
-                }
-              : undefined
-          }
         />
       )}
     </div>

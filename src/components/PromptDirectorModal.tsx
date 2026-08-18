@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useStudioStore } from '@/lib/projectStore';
 import { callOpenRouterDirector } from '@/lib/openrouter';
 import {
@@ -18,16 +18,26 @@ import {
 export const PromptDirectorModal: React.FC = () => {
   const {
     isDirectorModalOpen,
-    activeDirectorSceneId,
+    activeDirectorShotId,
     setDirectorModalOpen,
-    scenes,
-    updateScene,
+    sceneGroups,
+    updateShot,
     settings,
   } = useStudioStore();
 
-  const activeScene = scenes.find((s) => s.id === activeDirectorSceneId);
+  let targetSceneId = '';
+  let activeShot: any = null;
 
-  const [ideaInput, setIdeaInput] = useState(activeScene?.prompt || '');
+  for (const group of sceneGroups) {
+    const found = group.shots.find((s) => s.id === activeDirectorShotId);
+    if (found) {
+      targetSceneId = group.id;
+      activeShot = found;
+      break;
+    }
+  }
+
+  const [ideaInput, setIdeaInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [generatedResult, setGeneratedResult] = useState<{
     refinedPrompt: string;
@@ -37,7 +47,13 @@ export const PromptDirectorModal: React.FC = () => {
   } | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  if (!isDirectorModalOpen || !activeScene) return null;
+  useEffect(() => {
+    if (activeShot) {
+      setIdeaInput(activeShot.prompt || '');
+    }
+  }, [activeDirectorShotId, activeShot]);
+
+  if (!isDirectorModalOpen || !activeShot) return null;
 
   const handleGenerate = async () => {
     if (!ideaInput.trim()) return;
@@ -45,16 +61,16 @@ export const PromptDirectorModal: React.FC = () => {
     setErrorMessage(null);
 
     try {
-      const hasStart = activeScene.references.some((r) => r.role === 'start_frame');
-      const hasEnd = activeScene.references.some((r) => r.role === 'end_frame');
+      const hasStart = activeShot.references.some((r: any) => r.role === 'start_frame');
+      const hasEnd = activeShot.references.some((r: any) => r.role === 'end_frame');
 
       const result = await callOpenRouterDirector({
         userIdea: ideaInput,
-        cameraMotion: activeScene.cameraMotion,
-        duration: activeScene.duration,
+        cameraMotion: activeShot.cameraMotion,
+        duration: activeShot.duration,
         hasStartFrame: hasStart,
         hasEndFrame: hasEnd,
-        model: settings.selectedLlmModel,
+        model: settings.directorModel || 'anthropic/claude-3.7-sonnet',
         apiKey: settings.openRouterApiKey,
       });
 
@@ -71,11 +87,11 @@ export const PromptDirectorModal: React.FC = () => {
   };
 
   const handleApply = () => {
-    if (!generatedResult) return;
-    updateScene(activeScene.id, {
+    if (!generatedResult || !targetSceneId) return;
+    updateShot(targetSceneId, activeShot.id, {
       prompt: generatedResult.refinedPrompt,
-      negativePrompt: generatedResult.negativePrompt || activeScene.negativePrompt,
-      cameraMotion: (generatedResult.suggestedCameraMotion as any) || activeScene.cameraMotion,
+      negativePrompt: generatedResult.negativePrompt || activeShot.negativePrompt,
+      cameraMotion: (generatedResult.suggestedCameraMotion as any) || activeShot.cameraMotion,
     });
     setDirectorModalOpen(false);
   };
@@ -90,110 +106,103 @@ export const PromptDirectorModal: React.FC = () => {
               <Sparkles className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="text-base font-bold text-white">
-                ✨ AI-Режиссер Сцены #{activeScene.sceneNumber}
-              </h2>
+              <h3 className="text-base font-bold text-white">AI-Режиссер и Промпт-Инженер</h3>
               <p className="text-xs text-gray-400">
-                Автоматическое обогащение промпта законами кинематографии, соматикой и 24fps
+                Автоматическое обогащение соматикой, динамикой и операторской оптикой
               </p>
             </div>
           </div>
           <button
+            type="button"
             onClick={() => setDirectorModalOpen(false)}
-            className="p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-studio-800 transition-colors"
+            className="p-1 rounded-lg text-gray-400 hover:text-white hover:bg-studio-800 transition-colors"
           >
-            <X className="w-4 h-4" />
+            <X className="w-5 h-5" />
           </button>
         </div>
 
         {/* Input Idea */}
         <div className="space-y-2">
-          <label className="text-xs font-semibold text-gray-300">
-            Опишите общую задумку сцены простыми словами:
+          <label className="text-xs font-semibold text-gray-300 uppercase tracking-wider block">
+            Ваша задумка шота (на русском или английском)
           </label>
           <textarea
             value={ideaInput}
             onChange={(e) => setIdeaInput(e.target.value)}
+            placeholder="Например: Монтажник в синей робе нервно смотрит на провода на складе..."
             rows={3}
-            placeholder="Например: Девушка детектив в темном переулке под дождем напряженно читает секретный документ, замечает слежку и резко оборачивается..."
-            className="w-full bg-studio-850 border border-studio-700 rounded-xl p-3.5 text-xs text-gray-200 placeholder-gray-500 focus:outline-none focus:border-studio-cyan transition-colors resize-none"
+            className="w-full rounded-xl bg-studio-850 border border-studio-700 p-3 text-xs text-gray-200 focus:outline-none focus:border-studio-cyan resize-y"
           />
         </div>
 
-        {/* Generation Button */}
-        <button
-          type="button"
-          onClick={handleGenerate}
-          disabled={isLoading || !ideaInput.trim()}
-          className="w-full py-2.5 rounded-xl bg-gradient-to-r from-studio-cyan to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-black font-bold text-xs flex items-center justify-center gap-2 transition-all shadow-lg shadow-studio-cyan/20 disabled:opacity-50"
-        >
-          {isLoading ? (
-            <>
-              <RotateCw className="w-4 h-4 animate-spin" />
-              <span>Режиссер формулирует кадр через {settings.selectedLlmModel}...</span>
-            </>
-          ) : (
-            <>
-              <Sparkles className="w-4 h-4" />
-              <span>Сформировать Кинематографический Промпт</span>
-            </>
-          )}
-        </button>
-
-        {/* Error message */}
         {errorMessage && (
-          <div className="p-3 rounded-xl bg-studio-rose/10 border border-studio-rose/30 text-xs text-rose-300">
+          <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-xs text-rose-300">
             {errorMessage}
           </div>
         )}
 
-        {/* Results Preview */}
+        {/* Action Button */}
+        <button
+          type="button"
+          disabled={isLoading || !ideaInput.trim()}
+          onClick={handleGenerate}
+          className="w-full py-3 rounded-xl bg-gradient-to-r from-studio-accent to-purple-600 hover:from-purple-600 hover:to-indigo-500 text-white font-bold text-xs flex items-center justify-center gap-2 transition-all disabled:opacity-50 shadow-md shadow-studio-accent/20"
+        >
+          {isLoading ? (
+            <>
+              <RotateCw className="w-4 h-4 animate-spin text-studio-cyan" />
+              <span>Генерация кинематографического промпта...</span>
+            </>
+          ) : (
+            <>
+              <Sparkles className="w-4 h-4" />
+              <span>Улучшить и сгенерировать промпт</span>
+            </>
+          )}
+        </button>
+
+        {/* Generated Result Preview */}
         {generatedResult && (
-          <div className="space-y-4 border-t border-studio-700 pt-4">
+          <div className="space-y-4 pt-3 border-t border-studio-750 animate-in fade-in duration-200">
             <div className="p-4 rounded-xl bg-studio-850 border border-studio-700 space-y-3">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-studio-cyan flex items-center gap-1.5">
-                  <Film className="w-4 h-4" />
-                  Готовый Промпт Seedance (English):
+              <div>
+                <span className="text-[11px] font-bold text-studio-cyan uppercase tracking-wider block">
+                  ✨ Обогащенный промпт (English Seedance DiT Standard)
                 </span>
-                <span className="text-[10px] font-mono text-gray-400">24fps Anti-Slowmo</span>
+                <p className="text-xs text-gray-200 mt-1 leading-relaxed font-mono bg-studio-900 p-2.5 rounded-lg border border-studio-750">
+                  {generatedResult.refinedPrompt}
+                </p>
               </div>
-              <p className="text-xs text-gray-200 font-sans leading-relaxed bg-studio-900 p-3 rounded-lg border border-studio-750 select-all">
-                {generatedResult.refinedPrompt}
-              </p>
+
+              {generatedResult.actingDirectives && generatedResult.actingDirectives.length > 0 && (
+                <div>
+                  <span className="text-[11px] font-bold text-gray-400 uppercase tracking-wider block">
+                    🎭 Соматические указания персонажу:
+                  </span>
+                  <ul className="text-xs text-gray-300 list-disc list-inside mt-1 space-y-0.5">
+                    {generatedResult.actingDirectives.map((d, i) => (
+                      <li key={i}>{d}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
             </div>
 
-            {/* Directives */}
-            {generatedResult.actingDirectives?.length > 0 && (
-              <div className="space-y-1.5">
-                <span className="text-xs font-semibold text-gray-400 flex items-center gap-1.5">
-                  <HeartPulse className="w-3.5 h-3.5 text-rose-400" />
-                  Соматические директивы (Anti-Stiffness):
-                </span>
-                <ul className="list-disc list-inside text-xs text-gray-300 space-y-1 pl-1">
-                  {generatedResult.actingDirectives.map((d, i) => (
-                    <li key={i}>{d}</li>
-                  ))}
-                </ul>
-              </div>
-            )}
-
-            {/* Action Buttons */}
-            <div className="flex items-center justify-end gap-3 pt-2">
+            <div className="flex justify-end gap-2">
               <button
                 type="button"
                 onClick={() => setDirectorModalOpen(false)}
-                className="px-4 py-2 rounded-xl text-xs font-semibold text-gray-400 hover:text-white"
+                className="px-4 py-2 rounded-xl bg-studio-800 text-gray-300 hover:text-white text-xs font-semibold"
               >
                 Отмена
               </button>
               <button
                 type="button"
                 onClick={handleApply}
-                className="flex items-center gap-2 px-5 py-2 rounded-xl bg-studio-emerald hover:bg-emerald-600 text-xs font-bold text-white shadow-lg shadow-studio-emerald/20 transition-all"
+                className="px-5 py-2 rounded-xl bg-studio-emerald hover:bg-emerald-600 text-white text-xs font-bold flex items-center gap-1.5 transition-colors shadow-md shadow-emerald-500/20"
               >
                 <Check className="w-4 h-4" />
-                <span>Применить к Сцене #{activeScene.sceneNumber}</span>
+                <span>Применить к шоту</span>
               </button>
             </div>
           </div>

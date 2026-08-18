@@ -1,5 +1,16 @@
 import { create } from 'zustand';
-import { Scene, StudioSettings, ProjectData, MediaReference, SeedanceModelId, StartFrameSourceMode, LogEntry } from '@/types/studio';
+import {
+  Shot,
+  SceneGroup,
+  StudioSettings,
+  MediaReference,
+  SeedanceModelId,
+  StartFrameSourceMode,
+  LogEntry,
+  AspectRatio,
+  Resolution,
+  FrameRate,
+} from '@/types/studio';
 import { extractLastFrameFromVideo } from './frameExtractor';
 import { applyNoiseToImage } from './noiseFilter';
 import { submitSceneGeneration, pollSceneStatus } from './seedance';
@@ -7,15 +18,24 @@ import { submitSceneGeneration, pollSceneStatus } from './seedance';
 interface StudioState {
   projectName: string;
   settings: StudioSettings;
-  scenes: Scene[];
-  selectedSceneId: string | null;
+  
+  // Scene Groups (Packages/Episodes) & Active Scene
+  sceneGroups: SceneGroup[];
+  activeSceneId: string;
+  
+  // Modals & UI States
+  selectedShotId: string | null;
   isMasterPlayerOpen: boolean;
   isSettingsOpen: boolean;
   isDirectorModalOpen: boolean;
   isLogsModalOpen: boolean;
-  activeDirectorSceneId: string | null;
+  activeDirectorShotId: string | null;
+  advancedSettingsModalShot: { sceneId: string; shotId: string } | null;
+  
+  // Cascade Render States
   isCascadeRendering: boolean;
-  currentRenderingSceneIndex: number;
+  currentRenderingShotIndex: number;
+  
   openRouterBalanceInfo: {
     isValid: boolean;
     usage?: number;
@@ -24,39 +44,48 @@ interface StudioState {
   } | null;
   logs: LogEntry[];
 
-  // Actions
+  // Global Actions
   setProjectName: (name: string) => void;
   updateSettings: (settings: Partial<StudioSettings>) => void;
   setBalanceInfo: (info: any) => void;
-  setSelectedSceneId: (id: string | null) => void;
+  setSelectedShotId: (id: string | null) => void;
   setMasterPlayerOpen: (open: boolean) => void;
   setSettingsOpen: (open: boolean) => void;
-  setDirectorModalOpen: (open: boolean, sceneId?: string) => void;
+  setDirectorModalOpen: (open: boolean, shotId?: string) => void;
   setLogsModalOpen: (open: boolean) => void;
+  setAdvancedSettingsModalShot: (data: { sceneId: string; shotId: string } | null) => void;
   addLog: (level: LogEntry['level'], category: LogEntry['category'], message: string, details?: any) => void;
   clearLogs: () => void;
 
-  // Scene Operations
-  addScene: (afterSceneId?: string) => void;
-  removeScene: (sceneId: string) => void;
-  duplicateScene: (sceneId: string) => void;
-  updateScene: (sceneId: string, data: Partial<Scene>) => void;
-  reorderScenes: (startIndex: number, endIndex: number) => void;
+  // Scene Group Operations (Packages)
+  setActiveSceneId: (sceneId: string) => void;
+  addSceneGroup: (copyFromSceneId?: string) => void;
+  removeSceneGroup: (sceneId: string) => void;
+  renameSceneGroup: (sceneId: string, name: string) => void;
+  duplicateSceneGroup: (sceneId: string) => void;
+
+  // Shot Operations (inside active or specified scene group)
+  addShotToScene: (sceneId: string, afterShotId?: string) => void;
+  removeShot: (sceneId: string, shotId: string) => void;
+  duplicateShot: (sceneId: string, shotId: string) => void;
+  updateShot: (sceneId: string, shotId: string, data: Partial<Shot>) => void;
+  reorderShots: (sceneId: string, startIndex: number, endIndex: number) => void;
 
   // Reference Operations
-  addReferenceToScene: (sceneId: string, ref: Omit<MediaReference, 'id'>) => void;
-  removeReferenceFromScene: (sceneId: string, refId: string) => void;
-  updateReferenceRole: (sceneId: string, refId: string, role: MediaReference['role']) => void;
-  updateReferenceUrl: (sceneId: string, refId: string, url: string) => void;
-  copyReferencesFromScene: (targetSceneId: string, sourceSceneNumber: number) => void;
+  addReferenceToShot: (sceneId: string, shotId: string, ref: Omit<MediaReference, 'id'>) => void;
+  removeReferenceFromShot: (sceneId: string, shotId: string, refId: string) => void;
+  updateReferenceRole: (sceneId: string, shotId: string, refId: string, role: MediaReference['role']) => void;
+  updateReferenceUrl: (sceneId: string, shotId: string, refId: string, url: string) => void;
+  updateReferenceData: (sceneId: string, shotId: string, refId: string, data: Partial<MediaReference>) => void;
+  copyReferencesFromShot: (sceneId: string, targetShotId: string, sourceShotNumber: number) => void;
 
   // Keyframe Source Selection
-  setStartFrameSource: (sceneId: string, mode: StartFrameSourceMode, targetSceneNumber?: number) => void;
+  setStartFrameSource: (sceneId: string, shotId: string, mode: StartFrameSourceMode, targetShotNumber?: number) => void;
 
   // Execution & Keyframe Chaining
-  getResolvedStartFrameForScene: (sceneIndex: number) => { url?: string; sourceLabel: string };
-  renderSceneById: (sceneId: string) => Promise<void>;
-  startBatchCascadeRender: () => Promise<void>;
+  getResolvedStartFrameForShot: (sceneId: string, shotIndex: number) => { url?: string; sourceLabel: string };
+  renderShotById: (sceneId: string, shotId: string) => Promise<void>;
+  startCascadeRenderForScene: (sceneId: string) => Promise<void>;
   stopCascadeRender: () => void;
 
   // Project persistence & LocalStorage
@@ -65,69 +94,42 @@ interface StudioState {
   importProjectJson: (jsonString: string) => boolean;
 }
 
-const FULL_PROJECT_STORAGE_KEY = 'seedance_studio_full_project_v2';
+const STORAGE_KEY_V3 = 'seedance_studio_full_project_v3';
+const STORAGE_KEY_V2 = 'seedance_studio_full_project_v2';
 const SETTINGS_STORAGE_KEY = 'seedance_studio_settings_v1';
 
 const DEFAULT_SETTINGS: StudioSettings = {
   openRouterApiKey: '',
-  selectedLlmModel: 'anthropic/claude-3.7-sonnet',
-  defaultSeedanceModel: 'bytedance/seedance-2.5',
-  zeroDataRetention: true,
-  autoCascadeRender: true,
-  enableAiDirector: true,
-  defaultAspectRatio: '16:9',
-  defaultResolution: '1080p',
+  defaultModel: 'bytedance/seedance-2.5',
+  defaultAspectRatio: 'auto',
+  defaultResolution: '720p',
   defaultDuration: 5,
-  appTitle: 'Seedance Studio Pro',
+  defaultFps: 24,
+  enableAiDirector: true,
+  autoExtractLastFrame: true,
+  directorModel: 'anthropic/claude-3.7-sonnet',
 };
 
-function saveFullProjectToStorage(projectName: string, settings: StudioSettings, scenes: Scene[]) {
-  if (typeof window === 'undefined') return;
-  try {
-    const data = {
-      projectName,
-      settings,
-      scenes,
-    };
-    localStorage.setItem(FULL_PROJECT_STORAGE_KEY, JSON.stringify(data));
-  } catch (e) {
-    console.warn('Could not save full project to localStorage', e);
-  }
-}
-
-function loadFullProjectFromStorage(): { projectName?: string; settings?: StudioSettings; scenes?: Scene[] } | null {
-  if (typeof window === 'undefined') return null;
-  try {
-    const saved = localStorage.getItem(FULL_PROJECT_STORAGE_KEY);
-    if (saved) {
-      return JSON.parse(saved);
-    }
-  } catch (e) {
-    console.warn('Could not load full project from localStorage', e);
-  }
-  return null;
-}
-
-function createInitialScene(sceneNumber: number, id?: string, inheritedPrevScene?: Scene): Scene {
-  if (inheritedPrevScene) {
+function createInitialShot(shotNumber: number, id?: string, inheritedPrevShot?: Shot): Shot {
+  if (inheritedPrevShot) {
     return {
-      id: id || `scene_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-      sceneNumber,
-      title: `Сцена ${sceneNumber}`,
-      model: inheritedPrevScene.model,
+      id: id || `shot_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      shotNumber,
+      title: `Шот ${shotNumber}`,
+      model: inheritedPrevShot.model,
       prompt: '',
-      negativePrompt: inheritedPrevScene.negativePrompt,
-      duration: inheritedPrevScene.duration,
-      resolution: inheritedPrevScene.resolution,
-      aspectRatio: inheritedPrevScene.aspectRatio,
-      cameraMotion: inheritedPrevScene.cameraMotion,
-      motionStrength: inheritedPrevScene.motionStrength,
-      fps: inheritedPrevScene.fps,
+      negativePrompt: inheritedPrevShot.negativePrompt,
+      duration: inheritedPrevShot.duration,
+      resolution: inheritedPrevShot.resolution,
+      aspectRatio: inheritedPrevShot.aspectRatio || 'auto',
+      cameraMotion: 'none',
+      motionStrength: inheritedPrevShot.motionStrength,
+      fps: inheritedPrevShot.fps,
       seed: Math.floor(Math.random() * 1000000),
-      generateAudio: inheritedPrevScene.generateAudio,
+      generateAudio: inheritedPrevShot.generateAudio,
       references: [],
       startFrameSourceMode: 'previous_scene',
-      startFrameSourceSceneNumber: inheritedPrevScene.sceneNumber,
+      startFrameSourceSceneNumber: inheritedPrevShot.shotNumber,
       status: 'draft',
       progress: 0,
       createdAt: Date.now(),
@@ -135,569 +137,846 @@ function createInitialScene(sceneNumber: number, id?: string, inheritedPrevScene
   }
 
   return {
-    id: id || `scene_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-    sceneNumber,
-    title: `Сцена ${sceneNumber}`,
+    id: id || `shot_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+    shotNumber,
+    title: `Шот ${shotNumber}`,
     model: 'bytedance/seedance-2.5',
     prompt: '',
     negativePrompt: 'blur, low quality, distortion, morphing, static, deformed hands, zero slow-motion',
     duration: 5,
-    resolution: '1080p',
-    aspectRatio: '16:9',
+    resolution: '720p',
+    aspectRatio: 'auto',
     cameraMotion: 'none',
     motionStrength: 5.0,
     fps: 24,
     seed: Math.floor(Math.random() * 1000000),
     generateAudio: true,
     references: [],
-    startFrameSourceMode: sceneNumber === 1 ? 'manual_upload' : 'previous_scene',
-    startFrameSourceSceneNumber: sceneNumber > 1 ? sceneNumber - 1 : undefined,
+    startFrameSourceMode: shotNumber === 1 ? 'none' : 'previous_scene',
     status: 'draft',
     progress: 0,
     createdAt: Date.now(),
   };
 }
 
-export const useStudioStore = create<StudioState>((set, get) => ({
-  projectName: 'Новый Кино-Проект',
-  settings: DEFAULT_SETTINGS,
-  scenes: [createInitialScene(1)],
-  selectedSceneId: null,
-  isMasterPlayerOpen: false,
-  isSettingsOpen: false,
-  isDirectorModalOpen: false,
-  isLogsModalOpen: false,
-  activeDirectorSceneId: null,
-  isCascadeRendering: false,
-  currentRenderingSceneIndex: 0,
-  openRouterBalanceInfo: null,
-  logs: [
-    {
-      id: `log_${Date.now()}`,
-      timestamp: new Date().toLocaleTimeString(),
-      level: 'info',
-      category: 'SETTINGS',
-      message: 'Инициализация Seedance Studio Pro (Zero-Guesswork Standard v2.7)',
+function createInitialSceneGroup(sceneNumber: number, inheritedPrevGroup?: SceneGroup): SceneGroup {
+  const groupId = `scene_group_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+  
+  if (inheritedPrevGroup) {
+    const latestShot = inheritedPrevGroup.shots[inheritedPrevGroup.shots.length - 1];
+    const initialShot = createInitialShot(1, undefined, latestShot);
+    // Scene #1 has startFrameSourceMode none by default unless inherited
+    initialShot.startFrameSourceMode = 'none';
+
+    return {
+      id: groupId,
+      sceneNumber,
+      name: `Сцена ${sceneNumber}`,
+      shots: [initialShot],
+      defaultSettings: {
+        model: latestShot?.model || 'bytedance/seedance-2.5',
+        duration: latestShot?.duration || 5,
+        resolution: latestShot?.resolution || '720p',
+        aspectRatio: latestShot?.aspectRatio || 'auto',
+        fps: latestShot?.fps || 24,
+        generateAudio: latestShot?.generateAudio !== undefined ? latestShot.generateAudio : true,
+      },
+    };
+  }
+
+  return {
+    id: groupId,
+    sceneNumber,
+    name: `Сцена ${sceneNumber}`,
+    shots: [createInitialShot(1)],
+    defaultSettings: {
+      model: 'bytedance/seedance-2.5',
+      duration: 5,
+      resolution: '720p',
+      aspectRatio: 'auto',
+      fps: 24,
+      generateAudio: true,
     },
-  ],
+  };
+}
 
-  addLog: (level, category, message, details) => {
-    const newEntry: LogEntry = {
-      id: `log_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-      timestamp: new Date().toLocaleTimeString(),
-      level,
-      category,
-      message,
-      details,
+function saveFullProjectToStorage(projectName: string, settings: StudioSettings, sceneGroups: SceneGroup[], activeSceneId: string) {
+  if (typeof window === 'undefined') return;
+  try {
+    const data = {
+      projectName,
+      settings,
+      sceneGroups,
+      activeSceneId,
     };
-    set((state) => ({
-      logs: [newEntry, ...state.logs.slice(0, 199)],
-    }));
-  },
+    localStorage.setItem(STORAGE_KEY_V3, JSON.stringify(data));
+  } catch (e) {
+    console.warn('Could not save full project to localStorage', e);
+  }
+}
 
-  clearLogs: () => set({ logs: [] }),
-
-  loadPersistedSettings: () => {
-    const project = loadFullProjectFromStorage();
-    if (project) {
-      set({
-        projectName: project.projectName || get().projectName,
-        settings: { ...DEFAULT_SETTINGS, ...project.settings },
-        scenes: project.scenes && project.scenes.length > 0 ? project.scenes : get().scenes,
-        selectedSceneId: project.scenes?.[0]?.id || null,
-      });
-      get().addLog('info', 'SETTINGS', `Восстановлен проект "${project.projectName || 'Без названия'}" (${project.scenes?.length || 1} сцен) из LocalStorage`);
-      return;
+function loadFullProjectFromStorage(): { projectName?: string; settings?: StudioSettings; sceneGroups?: SceneGroup[]; activeSceneId?: string } | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    // 1. Try Loading V3 structure
+    const savedV3 = localStorage.getItem(STORAGE_KEY_V3);
+    if (savedV3) {
+      return JSON.parse(savedV3);
     }
 
-    get().addLog('info', 'SETTINGS', 'Новый проект инициализирован');
-  },
-
-  setProjectName: (name) => {
-    set({ projectName: name });
-    saveFullProjectToStorage(name, get().settings, get().scenes);
-  },
-
-  updateSettings: (newSettings) => {
-    set((state) => {
-      const merged = { ...state.settings, ...newSettings };
-      saveFullProjectToStorage(state.projectName, merged, state.scenes);
-      return { settings: merged };
-    });
-    get().addLog('info', 'SETTINGS', 'Обновлены настройки студии');
-  },
-
-  setBalanceInfo: (info) => set({ openRouterBalanceInfo: info }),
-  setSelectedSceneId: (id) => set({ selectedSceneId: id }),
-  setMasterPlayerOpen: (open) => set({ isMasterPlayerOpen: open }),
-  setSettingsOpen: (open) => set({ isSettingsOpen: open }),
-  setLogsModalOpen: (open) => set({ isLogsModalOpen: open }),
-  setDirectorModalOpen: (open, sceneId) =>
-    set({ isDirectorModalOpen: open, activeDirectorSceneId: sceneId || null }),
-
-  addScene: (afterSceneId) => {
-    const { scenes, addLog, projectName, settings } = get();
-    const newSceneNumber = scenes.length + 1;
-    const prevScene = scenes[scenes.length - 1];
-    
-    const newScene = createInitialScene(newSceneNumber, undefined, prevScene);
-
-    let updatedScenes = [...scenes];
-    if (afterSceneId) {
-      const idx = scenes.findIndex((s) => s.id === afterSceneId);
-      if (idx !== -1) {
-        updatedScenes.splice(idx + 1, 0, newScene);
-        updatedScenes = updatedScenes.map((s, i) => ({ ...s, sceneNumber: i + 1, title: `Сцена ${i + 1}` }));
-      }
-    } else {
-      updatedScenes.push(newScene);
-    }
-
-    set({ scenes: updatedScenes, selectedSceneId: newScene.id });
-    saveFullProjectToStorage(projectName, settings, updatedScenes);
-    addLog('info', 'SETTINGS', `Добавлена новая Сцена #${newSceneNumber} на таймлайн`);
-  },
-
-  removeScene: (sceneId) => {
-    const { scenes, addLog, projectName, settings } = get();
-    if (scenes.length <= 1) return;
-    const filtered = scenes.filter((s) => s.id !== sceneId);
-    const renumbered = filtered.map((s, i) => ({ ...s, sceneNumber: i + 1, title: `Сцена ${i + 1}` }));
-    set({ scenes: renumbered, selectedSceneId: renumbered[0].id });
-    saveFullProjectToStorage(projectName, settings, renumbered);
-    addLog('warn', 'SETTINGS', `Удалена сцена из проекта. Перенумеровано сцен: ${renumbered.length}`);
-  },
-
-  duplicateScene: (sceneId) => {
-    const { scenes, addLog, projectName, settings } = get();
-    const targetIdx = scenes.findIndex((s) => s.id === sceneId);
-    if (targetIdx === -1) return;
-    const target = scenes[targetIdx];
-    const duplicated: Scene = {
-      ...JSON.parse(JSON.stringify(target)),
-      id: `scene_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-      status: 'draft',
-      progress: 0,
-      outputVideoUrl: undefined,
-      extractedLastFrameUrl: undefined,
-      createdAt: Date.now(),
-    };
-    const updated = [...scenes];
-    updated.splice(targetIdx + 1, 0, duplicated);
-    const renumbered = updated.map((s, i) => ({ ...s, sceneNumber: i + 1, title: `Сцена ${i + 1}` }));
-    set({ scenes: renumbered, selectedSceneId: duplicated.id });
-    saveFullProjectToStorage(projectName, settings, renumbered);
-    addLog('info', 'SETTINGS', `Дублирована Сцена #${target.sceneNumber}`);
-  },
-
-  updateScene: (sceneId, data) => {
-    const { scenes, settings, updateSettings, projectName } = get();
-    const currentScene = scenes.find((s) => s.id === sceneId);
-
-    const isSceneOne = currentScene?.sceneNumber === 1;
-    const hasGlobalFormatChange = data.model !== undefined || data.aspectRatio !== undefined || data.resolution !== undefined;
-
-    let updatedScenes: Scene[];
-    if (isSceneOne && hasGlobalFormatChange) {
-      const propagationPatch: Partial<Scene> = {};
-      if (data.model !== undefined) propagationPatch.model = data.model;
-      if (data.aspectRatio !== undefined) propagationPatch.aspectRatio = data.aspectRatio;
-      if (data.resolution !== undefined) propagationPatch.resolution = data.resolution;
-
-      updateSettings({
-        defaultSeedanceModel: data.model || settings.defaultSeedanceModel,
-        defaultAspectRatio: data.aspectRatio || settings.defaultAspectRatio,
-        defaultResolution: data.resolution || settings.defaultResolution,
-      });
-
-      updatedScenes = scenes.map((s) => {
-        if (s.id === sceneId) {
-          return { ...s, ...data };
-        }
-        return { ...s, ...propagationPatch };
-      });
-    } else {
-      updatedScenes = scenes.map((s) => (s.id === sceneId ? { ...s, ...data } : s));
-    }
-
-    set({ scenes: updatedScenes });
-    saveFullProjectToStorage(projectName, settings, updatedScenes);
-  },
-
-  reorderScenes: (startIndex, endIndex) => {
-    const { scenes, projectName, settings } = get();
-    const result = Array.from(scenes);
-    const [removed] = result.splice(startIndex, 1);
-    result.splice(endIndex, 0, removed);
-    const renumbered = result.map((s, i) => ({ ...s, sceneNumber: i + 1, title: `Сцена ${i + 1}` }));
-    set({ scenes: renumbered });
-    saveFullProjectToStorage(projectName, settings, renumbered);
-  },
-
-  addReferenceToScene: (sceneId, refData) => {
-    const { scenes, projectName, settings } = get();
-    const newRef: MediaReference = {
-      ...refData,
-      id: `ref_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-    };
-    const updatedScenes = scenes.map((s) => {
-      if (s.id !== sceneId) return s;
-      let updatedRefs = s.references;
-      if (newRef.role === 'start_frame' || newRef.role === 'end_frame') {
-        updatedRefs = updatedRefs.filter((r) => r.role !== newRef.role);
-      }
-      return {
-        ...s,
-        references: [...updatedRefs, newRef],
-      };
-    });
-
-    set({ scenes: updatedScenes });
-    saveFullProjectToStorage(projectName, settings, updatedScenes);
-    get().addLog('info', 'API', `Добавлен медиа-референс [${newRef.role}] в сцену`);
-  },
-
-  removeReferenceFromScene: (sceneId, refId) => {
-    const { scenes, projectName, settings } = get();
-    const updatedScenes = scenes.map((s) => {
-      if (s.id !== sceneId) return s;
-      return {
-        ...s,
-        references: s.references.filter((r) => r.id !== refId),
-      };
-    });
-    set({ scenes: updatedScenes });
-    saveFullProjectToStorage(projectName, settings, updatedScenes);
-  },
-
-  updateReferenceRole: (sceneId, refId, role) => {
-    const { scenes, projectName, settings } = get();
-    const updatedScenes = scenes.map((s) => {
-      if (s.id !== sceneId) return s;
-      return {
-        ...s,
-        references: s.references.map((r) => (r.id === refId ? { ...r, role } : r)),
-      };
-    });
-    set({ scenes: updatedScenes });
-    saveFullProjectToStorage(projectName, settings, updatedScenes);
-  },
-
-  updateReferenceUrl: (sceneId, refId, url) => {
-    const { scenes, projectName, settings } = get();
-    const updatedScenes = scenes.map((s) => {
-      if (s.id !== sceneId) return s;
-      return {
-        ...s,
-        references: s.references.map((r) => (r.id === refId ? { ...r, url } : r)),
-      };
-    });
-    set({ scenes: updatedScenes });
-    saveFullProjectToStorage(projectName, settings, updatedScenes);
-  },
-
-  copyReferencesFromScene: (targetSceneId: string, sourceSceneNumber: number) => {
-    const { scenes, addLog, projectName, settings } = get();
-    const sourceScene = scenes.find((s) => s.sceneNumber === sourceSceneNumber);
-    if (!sourceScene || sourceScene.references.length === 0) return;
-
-    const updatedScenes = scenes.map((s) => {
-      if (s.id !== targetSceneId) return s;
-      const copied = sourceScene.references
-        .filter((r) => r.role !== 'start_frame' && r.role !== 'end_frame')
-        .map((r) => ({
-          ...r,
-          id: `ref_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-          isInheritedFromPrevious: true,
-        }));
-      return {
-        ...s,
-        references: [...s.references, ...copied],
-      };
-    });
-
-    set({ scenes: updatedScenes });
-    saveFullProjectToStorage(projectName, settings, updatedScenes);
-    addLog('info', 'SETTINGS', `Скопировано ${sourceScene.references.length} референсов из Сцены #${sourceSceneNumber}`);
-  },
-
-  setStartFrameSource: (sceneId, mode, targetSceneNumber) => {
-    const { scenes, projectName, settings } = get();
-    const updatedScenes = scenes.map((s) => {
-      if (s.id !== sceneId) return s;
-      return {
-        ...s,
-        startFrameSourceMode: mode,
-        startFrameSourceSceneNumber: targetSceneNumber,
-      };
-    });
-    set({ scenes: updatedScenes });
-    saveFullProjectToStorage(projectName, settings, updatedScenes);
-  },
-
-  getResolvedStartFrameForScene: (sceneIndex: number): { url?: string; sourceLabel: string } => {
-    const { scenes } = get();
-    if (sceneIndex < 0 || sceneIndex >= scenes.length) return { sourceLabel: 'Не задан' };
-    const currentScene = scenes[sceneIndex];
-
-    if (currentScene.startFrameSourceMode === 'none') {
-      return { sourceLabel: 'Наследование отключено (независимый старт)' };
-    }
-
-    const explicitStart = currentScene.references.find((r) => r.role === 'start_frame');
-    if (currentScene.startFrameSourceMode === 'manual_upload' || (explicitStart && !explicitStart.isInheritedFromPrevious)) {
-      if (explicitStart?.url) {
-        return { url: explicitStart.url, sourceLabel: 'Загружен вручную' };
-      }
-    }
-
-    if (sceneIndex === 0) {
-      return explicitStart?.url
-        ? { url: explicitStart.url, sourceLabel: 'Загружен вручную' }
-        : { sourceLabel: 'Свободный старт (T2V)' };
-    }
-
-    let targetIndex = sceneIndex - 1;
-    if (currentScene.startFrameSourceMode === 'custom_scene' && currentScene.startFrameSourceSceneNumber) {
-      targetIndex = currentScene.startFrameSourceSceneNumber - 1;
-    }
-
-    if (targetIndex >= 0 && targetIndex < scenes.length) {
-      const sourceScene = scenes[targetIndex];
-      const sourceEndFrame = sourceScene.references.find((r) => r.role === 'end_frame');
-      if (sourceEndFrame?.url) {
+    // 2. Migration from Legacy V2 flat scenes
+    const savedV2 = localStorage.getItem(STORAGE_KEY_V2);
+    if (savedV2) {
+      const v2Data = JSON.parse(savedV2);
+      if (v2Data.scenes && Array.isArray(v2Data.scenes) && v2Data.scenes.length > 0) {
+        const migratedGroup: SceneGroup = {
+          id: 'scene_group_migrated_1',
+          sceneNumber: 1,
+          name: 'Сцена 1',
+          shots: v2Data.scenes.map((s: any, idx: number) => ({
+            ...s,
+            shotNumber: idx + 1,
+            title: `Шот ${idx + 1}`,
+          })),
+        };
         return {
-          url: sourceEndFrame.url,
-          sourceLabel: `Конечный кадр Сцены #${sourceScene.sceneNumber}`,
+          projectName: v2Data.projectName || 'Новый Кино-Проект',
+          settings: v2Data.settings || DEFAULT_SETTINGS,
+          sceneGroups: [migratedGroup],
+          activeSceneId: migratedGroup.id,
         };
       }
-      if (sourceScene.extractedLastFrameUrl) {
-        return {
-          url: sourceScene.extractedLastFrameUrl,
-          sourceLabel: `Авто-финал видео Сцены #${sourceScene.sceneNumber}`,
-        };
-      }
-      return {
-        sourceLabel: `Ожидает завершения Сцены #${sourceScene.sceneNumber}`,
-      };
     }
+  } catch (e) {
+    console.warn('Could not load full project from localStorage', e);
+  }
+  return null;
+}
 
-    return { sourceLabel: 'Свободный старт' };
-  },
+export const useStudioStore = create<StudioState>((set, get) => {
+  const initialGroup = createInitialSceneGroup(1);
 
-  renderSceneById: async (sceneId: string) => {
-    const { scenes, settings, updateScene, getResolvedStartFrameForScene, addLog } = get();
-    const sceneIndex = scenes.findIndex((s) => s.id === sceneId);
-    if (sceneIndex === -1) return;
+  return {
+    projectName: 'Новый Кино-Проект',
+    settings: DEFAULT_SETTINGS,
+    sceneGroups: [initialGroup],
+    activeSceneId: initialGroup.id,
+    selectedShotId: null,
+    isMasterPlayerOpen: false,
+    isSettingsOpen: false,
+    isDirectorModalOpen: false,
+    isLogsModalOpen: false,
+    activeDirectorShotId: null,
+    advancedSettingsModalShot: null,
+    isCascadeRendering: false,
+    currentRenderingShotIndex: 0,
+    openRouterBalanceInfo: null,
+    logs: [
+      {
+        id: 'init_log',
+        timestamp: new Date().toLocaleTimeString(),
+        level: 'info',
+        category: 'SETTINGS',
+        message: 'Инициализация Seedance Studio Pro (Director Split Architecture v3.0)',
+      },
+    ],
 
-    const scene = scenes[sceneIndex];
+    // Global Actions
+    setProjectName: (name) => {
+      set({ projectName: name });
+      const { settings, sceneGroups, activeSceneId } = get();
+      saveFullProjectToStorage(name, settings, sceneGroups, activeSceneId);
+    },
 
-    if (!settings.openRouterApiKey || settings.openRouterApiKey.trim().length === 0) {
-      const errMsg = 'Отсутствует OpenRouter API Key! Введите ваш ключ в меню настроек (кнопка ⚙️ в правом верхнем углу).';
-      addLog('error', 'API', errMsg);
-      updateScene(sceneId, { status: 'error', errorMessage: errMsg });
-      throw new Error(errMsg);
-    }
-
-    if (!scene.prompt || scene.prompt.trim().length === 0) {
-      const errMsg = `Сцена #${scene.sceneNumber}: введите промпт перед запуском генерации!`;
-      addLog('error', 'RENDER', errMsg);
-      updateScene(sceneId, {
-        status: 'error',
-        errorMessage: errMsg,
-      });
-      throw new Error(errMsg);
-    }
-
-    addLog('info', 'RENDER', `🚀 Запуск генерации Сцены #${scene.sceneNumber}: ${scene.model}, ${scene.duration}s, ${scene.resolution}, ${scene.aspectRatio}`);
-    updateScene(sceneId, { status: 'rendering', progress: 5, errorMessage: undefined });
-
-    try {
-      const resolved = getResolvedStartFrameForScene(sceneIndex);
-      let finalStartFrame = resolved.url;
-
-      if (finalStartFrame && scene.applyAntiFilterNoise) {
-        const intensity = scene.noiseStrength !== undefined ? scene.noiseStrength : 0.45;
-        addLog(
-          'info',
-          'CANVAS',
-          `🛡️ Наложение анти-детект шума (${Math.round(intensity * 100)}% зернистости) на начальный кадр для обхода цензора...`
-        );
-        finalStartFrame = await applyNoiseToImage(finalStartFrame, intensity);
-      }
-
-      addLog('info', 'API', `📡 Отправка POST запроса к OpenRouter Video API (/api/seedance/generate)...`, {
-        model: scene.model,
-        hasStartFrame: !!finalStartFrame,
-        noiseBypassActive: !!scene.applyAntiFilterNoise,
-        referencesCount: scene.references.length,
-      });
-
-      const submission = await submitSceneGeneration(scene, finalStartFrame, settings.openRouterApiKey);
-
-      addLog('success', 'API', `✅ Задача успешно принята сервером! Job ID: ${submission.jobId || 'N/A'}`, {
-        pollingUrl: submission.pollingUrl,
-        initialStatus: submission.status,
-      });
-
-      if (submission.status === 'completed' && submission.videoUrl) {
-        addLog('success', 'RENDER', `🎉 Генерация моментально завершена! Видео URL получен.`);
-        updateScene(sceneId, {
-          status: 'completed',
-          progress: 100,
-          outputVideoUrl: submission.videoUrl,
-          completedAt: Date.now(),
-        });
-
-        try {
-          const lastFrame = await extractLastFrameFromVideo(submission.videoUrl);
-          updateScene(sceneId, { extractedLastFrameUrl: lastFrame });
-          addLog('info', 'CANVAS', `🖼️ Финальный кадр успешно извлечен и подготовлен для Сцены #${scene.sceneNumber + 1}`);
-        } catch (e) {
-          console.warn('Could not extract last frame:', e);
+    updateSettings: (newSettings) => {
+      set((state) => {
+        const updated = { ...state.settings, ...newSettings };
+        if (typeof window !== 'undefined') {
+          localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(updated));
         }
+        saveFullProjectToStorage(state.projectName, updated, state.sceneGroups, state.activeSceneId);
+        return { settings: updated };
+      });
+      get().addLog('info', 'SETTINGS', 'Настройки обновлены', newSettings);
+    },
+
+    setBalanceInfo: (info) => set({ openRouterBalanceInfo: info }),
+    setSelectedShotId: (id) => set({ selectedShotId: id }),
+    setMasterPlayerOpen: (open) => set({ isMasterPlayerOpen: open }),
+    setSettingsOpen: (open) => set({ isSettingsOpen: open }),
+    setDirectorModalOpen: (open, shotId) =>
+      set({ isDirectorModalOpen: open, activeDirectorShotId: shotId || null }),
+    setLogsModalOpen: (open) => set({ isLogsModalOpen: open }),
+    setAdvancedSettingsModalShot: (data) => set({ advancedSettingsModalShot: data }),
+
+    addLog: (level, category, message, details) => {
+      const entry: LogEntry = {
+        id: `log_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+        timestamp: new Date().toLocaleTimeString(),
+        level,
+        category,
+        message,
+        details,
+      };
+      set((state) => ({ logs: [entry, ...state.logs].slice(0, 150) }));
+    },
+
+    clearLogs: () => set({ logs: [] }),
+
+    // Scene Groups (Packages) Operations
+    setActiveSceneId: (sceneId) => {
+      set({ activeSceneId: sceneId });
+      const { projectName, settings, sceneGroups } = get();
+      saveFullProjectToStorage(projectName, settings, sceneGroups, sceneId);
+    },
+
+    addSceneGroup: (copyFromSceneId) => {
+      const { sceneGroups, activeSceneId, projectName, settings } = get();
+      const sourceGroup = copyFromSceneId
+        ? sceneGroups.find((g) => g.id === copyFromSceneId)
+        : sceneGroups.find((g) => g.id === activeSceneId) || sceneGroups[sceneGroups.length - 1];
+
+      const newSceneNumber = sceneGroups.length + 1;
+      const newGroup = createInitialSceneGroup(newSceneNumber, sourceGroup);
+      const updatedGroups = [...sceneGroups, newGroup];
+
+      set({ sceneGroups: updatedGroups, activeSceneId: newGroup.id });
+      saveFullProjectToStorage(projectName, settings, updatedGroups, newGroup.id);
+      get().addLog(
+        'success',
+        'SETTINGS',
+        `Создана Сцена #${newSceneNumber} («${newGroup.name}») со скопированными настройками модели и формата`
+      );
+    },
+
+    removeSceneGroup: (sceneId) => {
+      const { sceneGroups, activeSceneId, projectName, settings } = get();
+      if (sceneGroups.length <= 1) {
+        get().addLog('warn', 'SETTINGS', 'Нельзя удалить единственную сцену в проекте');
         return;
       }
 
-      updateScene(sceneId, {
-        jobId: submission.jobId,
-        pollingUrl: submission.pollingUrl,
-        progress: 15,
+      const updatedGroups = sceneGroups.filter((g) => g.id !== sceneId);
+      // Re-index remaining scene numbers
+      const reindexed = updatedGroups.map((g, i) => ({
+        ...g,
+        sceneNumber: i + 1,
+      }));
+
+      const newActiveId = activeSceneId === sceneId ? reindexed[0].id : activeSceneId;
+      set({ sceneGroups: reindexed, activeSceneId: newActiveId });
+      saveFullProjectToStorage(projectName, settings, reindexed, newActiveId);
+      get().addLog('info', 'SETTINGS', `Сцена удалена`);
+    },
+
+    renameSceneGroup: (sceneId, name) => {
+      const { sceneGroups, activeSceneId, projectName, settings } = get();
+      const updatedGroups = sceneGroups.map((g) => (g.id === sceneId ? { ...g, name } : g));
+      set({ sceneGroups: updatedGroups });
+      saveFullProjectToStorage(projectName, settings, updatedGroups, activeSceneId);
+    },
+
+    duplicateSceneGroup: (sceneId) => {
+      const { sceneGroups, activeSceneId, projectName, settings } = get();
+      const sourceGroup = sceneGroups.find((g) => g.id === sceneId);
+      if (!sourceGroup) return;
+
+      const newGroup: SceneGroup = {
+        id: `scene_group_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+        sceneNumber: sceneGroups.length + 1,
+        name: `${sourceGroup.name} (Копия)`,
+        shots: sourceGroup.shots.map((s, idx) => ({
+          ...s,
+          id: `shot_${Date.now()}_${idx}_${Math.random().toString(36).substring(2, 7)}`,
+          status: 'draft',
+          progress: 0,
+          outputVideoUrl: undefined,
+          extractedLastFrameUrl: undefined,
+        })),
+        defaultSettings: sourceGroup.defaultSettings ? { ...sourceGroup.defaultSettings } : undefined,
+      };
+
+      const updatedGroups = [...sceneGroups, newGroup];
+      set({ sceneGroups: updatedGroups, activeSceneId: newGroup.id });
+      saveFullProjectToStorage(projectName, settings, updatedGroups, newGroup.id);
+      get().addLog('success', 'SETTINGS', `Сцена продублирована`);
+    },
+
+    // Shot Operations (inside Scene Group)
+    addShotToScene: (sceneId, afterShotId) => {
+      const { sceneGroups, activeSceneId, projectName, settings } = get();
+      const targetGroup = sceneGroups.find((g) => g.id === sceneId);
+      if (!targetGroup) return;
+
+      const shots = targetGroup.shots;
+      let insertIndex = shots.length;
+      let previousShot: Shot | undefined = shots[shots.length - 1];
+
+      if (afterShotId) {
+        const foundIndex = shots.findIndex((s) => s.id === afterShotId);
+        if (foundIndex !== -1) {
+          insertIndex = foundIndex + 1;
+          previousShot = shots[foundIndex];
+        }
+      }
+
+      const newShot = createInitialShot(insertIndex + 1, undefined, previousShot);
+      const newShots = [...shots];
+      newShots.splice(insertIndex, 0, newShot);
+
+      // Re-index shot numbers
+      const reindexedShots = newShots.map((s, idx) => ({
+        ...s,
+        shotNumber: idx + 1,
+        title: `Шот ${idx + 1}`,
+      }));
+
+      const updatedGroups = sceneGroups.map((g) =>
+        g.id === sceneId ? { ...g, shots: reindexedShots } : g
+      );
+
+      set({ sceneGroups: updatedGroups });
+      saveFullProjectToStorage(projectName, settings, updatedGroups, activeSceneId);
+      get().addLog('info', 'SETTINGS', `Добавлен Шот #${insertIndex + 1} в ${targetGroup.name}`);
+    },
+
+    removeShot: (sceneId, shotId) => {
+      const { sceneGroups, activeSceneId, projectName, settings } = get();
+      const targetGroup = sceneGroups.find((g) => g.id === sceneId);
+      if (!targetGroup) return;
+
+      let remainingShots = targetGroup.shots.filter((s) => s.id !== shotId);
+      if (remainingShots.length === 0) {
+        remainingShots = [createInitialShot(1)];
+      }
+
+      const reindexedShots = remainingShots.map((s, idx) => ({
+        ...s,
+        shotNumber: idx + 1,
+        title: `Шот ${idx + 1}`,
+      }));
+
+      const updatedGroups = sceneGroups.map((g) =>
+        g.id === sceneId ? { ...g, shots: reindexedShots } : g
+      );
+
+      set({ sceneGroups: updatedGroups });
+      saveFullProjectToStorage(projectName, settings, updatedGroups, activeSceneId);
+      get().addLog('info', 'SETTINGS', `Шот удален из ${targetGroup.name}`);
+    },
+
+    duplicateShot: (sceneId, shotId) => {
+      const { sceneGroups, activeSceneId, projectName, settings } = get();
+      const targetGroup = sceneGroups.find((g) => g.id === sceneId);
+      if (!targetGroup) return;
+
+      const sourceShot = targetGroup.shots.find((s) => s.id === shotId);
+      if (!sourceShot) return;
+
+      const sourceIndex = targetGroup.shots.findIndex((s) => s.id === shotId);
+      const clonedShot: Shot = {
+        ...sourceShot,
+        id: `shot_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+        status: 'draft',
+        progress: 0,
+        outputVideoUrl: undefined,
+        extractedLastFrameUrl: undefined,
+        createdAt: Date.now(),
+      };
+
+      const newShots = [...targetGroup.shots];
+      newShots.splice(sourceIndex + 1, 0, clonedShot);
+
+      const reindexedShots = newShots.map((s, idx) => ({
+        ...s,
+        shotNumber: idx + 1,
+        title: `Шот ${idx + 1}`,
+      }));
+
+      const updatedGroups = sceneGroups.map((g) =>
+        g.id === sceneId ? { ...g, shots: reindexedShots } : g
+      );
+
+      set({ sceneGroups: updatedGroups });
+      saveFullProjectToStorage(projectName, settings, updatedGroups, activeSceneId);
+      get().addLog('info', 'SETTINGS', `Шот продублирован`);
+    },
+
+    updateShot: (sceneId, shotId, data) => {
+      const { sceneGroups, activeSceneId, projectName, settings } = get();
+      const updatedGroups = sceneGroups.map((g) => {
+        if (g.id !== sceneId) return g;
+        return {
+          ...g,
+          shots: g.shots.map((s) => (s.id === shotId ? { ...s, ...data } : s)),
+        };
       });
 
-      const pollingUrl = submission.pollingUrl;
-      const startTime = Date.now();
-      const maxAttempts = 120; // 10 minutes max
+      set({ sceneGroups: updatedGroups });
+      saveFullProjectToStorage(projectName, settings, updatedGroups, activeSceneId);
+    },
 
-      addLog('info', 'POLLING', `⏳ Запущен цикл поллинга статуса (интервал: 5 сек)...`);
+    reorderShots: (sceneId, startIndex, endIndex) => {
+      const { sceneGroups, activeSceneId, projectName, settings } = get();
+      const targetGroup = sceneGroups.find((g) => g.id === sceneId);
+      if (!targetGroup) return;
 
-      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-        await new Promise((res) => setTimeout(res, 5000));
+      const result = Array.from(targetGroup.shots);
+      const [removed] = result.splice(startIndex, 1);
+      result.splice(endIndex, 0, removed);
 
-        const elapsedSeconds = Math.round((Date.now() - startTime) / 1000);
-        addLog('info', 'POLLING', `🔄 Опрос #${attempt} (${elapsedSeconds} сек): проверка статуса задачи ${submission.jobId || ''}...`);
+      const reindexedShots = result.map((s, idx) => ({
+        ...s,
+        shotNumber: idx + 1,
+        title: `Шот ${idx + 1}`,
+      }));
 
-        const statusData = await pollSceneStatus(
-          pollingUrl,
-          settings.openRouterApiKey,
-          scene.sceneNumber,
-          submission.jobId
+      const updatedGroups = sceneGroups.map((g) =>
+        g.id === sceneId ? { ...g, shots: reindexedShots } : g
+      );
+
+      set({ sceneGroups: updatedGroups });
+      saveFullProjectToStorage(projectName, settings, updatedGroups, activeSceneId);
+    },
+
+    // Reference Operations
+    addReferenceToShot: (sceneId, shotId, ref) => {
+      const { sceneGroups, activeSceneId, projectName, settings } = get();
+      const newRef: MediaReference = {
+        ...ref,
+        id: `ref_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      };
+
+      const updatedGroups = sceneGroups.map((g) => {
+        if (g.id !== sceneId) return g;
+        return {
+          ...g,
+          shots: g.shots.map((s) => {
+            if (s.id !== shotId) return s;
+            let updatedRefs = s.references;
+            let startMode = s.startFrameSourceMode;
+
+            if (newRef.role === 'start_frame' || newRef.role === 'end_frame') {
+              updatedRefs = updatedRefs.filter((r) => r.role !== newRef.role);
+              if (newRef.role === 'start_frame') {
+                startMode = 'manual_upload';
+              }
+            }
+            return {
+              ...s,
+              references: [...updatedRefs, newRef],
+              startFrameSourceMode: startMode,
+            };
+          }),
+        };
+      });
+
+      set({ sceneGroups: updatedGroups });
+      saveFullProjectToStorage(projectName, settings, updatedGroups, activeSceneId);
+      get().addLog('info', 'API', `Добавлен референс [${newRef.role}] в шот`);
+    },
+
+    removeReferenceFromShot: (sceneId, shotId, refId) => {
+      const { sceneGroups, activeSceneId, projectName, settings } = get();
+      const updatedGroups = sceneGroups.map((g) => {
+        if (g.id !== sceneId) return g;
+        return {
+          ...g,
+          shots: g.shots.map((s) => {
+            if (s.id !== shotId) return s;
+            const removedRef = s.references.find((r) => r.id === refId);
+            let startMode = s.startFrameSourceMode;
+            if (removedRef?.role === 'start_frame' && startMode === 'manual_upload') {
+              startMode = s.shotNumber > 1 ? 'previous_scene' : 'none';
+            }
+            return {
+              ...s,
+              references: s.references.filter((r) => r.id !== refId),
+              startFrameSourceMode: startMode,
+            };
+          }),
+        };
+      });
+
+      set({ sceneGroups: updatedGroups });
+      saveFullProjectToStorage(projectName, settings, updatedGroups, activeSceneId);
+    },
+
+    updateReferenceRole: (sceneId, shotId, refId, role) => {
+      const { sceneGroups, activeSceneId, projectName, settings } = get();
+      const updatedGroups = sceneGroups.map((g) => {
+        if (g.id !== sceneId) return g;
+        return {
+          ...g,
+          shots: g.shots.map((s) => {
+            if (s.id !== shotId) return s;
+            let startMode = s.startFrameSourceMode;
+            if (role === 'start_frame') {
+              startMode = 'manual_upload';
+            }
+            return {
+              ...s,
+              startFrameSourceMode: startMode,
+              references: s.references.map((r) => (r.id === refId ? { ...r, role } : r)),
+            };
+          }),
+        };
+      });
+
+      set({ sceneGroups: updatedGroups });
+      saveFullProjectToStorage(projectName, settings, updatedGroups, activeSceneId);
+    },
+
+    updateReferenceUrl: (sceneId, shotId, refId, url) => {
+      const { sceneGroups, activeSceneId, projectName, settings } = get();
+      const updatedGroups = sceneGroups.map((g) => {
+        if (g.id !== sceneId) return g;
+        return {
+          ...g,
+          shots: g.shots.map((s) => {
+            if (s.id !== shotId) return s;
+            return {
+              ...s,
+              references: s.references.map((r) => (r.id === refId ? { ...r, url } : r)),
+            };
+          }),
+        };
+      });
+
+      set({ sceneGroups: updatedGroups });
+      saveFullProjectToStorage(projectName, settings, updatedGroups, activeSceneId);
+    },
+
+    updateReferenceData: (sceneId, shotId, refId, data) => {
+      const { sceneGroups, activeSceneId, projectName, settings } = get();
+      const updatedGroups = sceneGroups.map((g) => {
+        if (g.id !== sceneId) return g;
+        return {
+          ...g,
+          shots: g.shots.map((s) => {
+            if (s.id !== shotId) return s;
+            return {
+              ...s,
+              references: s.references.map((r) => (r.id === refId ? { ...r, ...data } : r)),
+            };
+          }),
+        };
+      });
+
+      set({ sceneGroups: updatedGroups });
+      saveFullProjectToStorage(projectName, settings, updatedGroups, activeSceneId);
+    },
+
+    copyReferencesFromShot: (sceneId, targetShotId, sourceShotNumber) => {
+      const { sceneGroups, activeSceneId, projectName, settings, addLog } = get();
+      const targetGroup = sceneGroups.find((g) => g.id === sceneId);
+      if (!targetGroup) return;
+
+      const sourceShot = targetGroup.shots.find((s) => s.shotNumber === sourceShotNumber);
+      if (!sourceShot) return;
+
+      const refsToCopy = sourceShot.references.filter(
+        (r) => r.role !== 'start_frame' && r.role !== 'end_frame'
+      );
+
+      const updatedGroups = sceneGroups.map((g) => {
+        if (g.id !== sceneId) return g;
+        return {
+          ...g,
+          shots: g.shots.map((s) => {
+            if (s.id !== targetShotId) return s;
+            const newCopiedRefs = refsToCopy.map((r) => ({
+              ...r,
+              id: `ref_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+            }));
+            return {
+              ...s,
+              references: [...s.references, ...newCopiedRefs],
+            };
+          }),
+        };
+      });
+
+      set({ sceneGroups: updatedGroups });
+      saveFullProjectToStorage(projectName, settings, updatedGroups, activeSceneId);
+      addLog('success', 'SETTINGS', `Скопировано ${refsToCopy.length} референсов из Шота #${sourceShotNumber}`);
+    },
+
+    setStartFrameSource: (sceneId, shotId, mode, targetShotNumber) => {
+      const { sceneGroups, activeSceneId, projectName, settings } = get();
+      const updatedGroups = sceneGroups.map((g) => {
+        if (g.id !== sceneId) return g;
+        return {
+          ...g,
+          shots: g.shots.map((s) => {
+            if (s.id !== shotId) return s;
+            return {
+              ...s,
+              startFrameSourceMode: mode,
+              startFrameSourceSceneNumber: targetShotNumber,
+            };
+          }),
+        };
+      });
+
+      set({ sceneGroups: updatedGroups });
+      saveFullProjectToStorage(projectName, settings, updatedGroups, activeSceneId);
+    },
+
+    // Resolving Start Frame for cascading execution
+    getResolvedStartFrameForShot: (sceneId, shotIndex) => {
+      const { sceneGroups } = get();
+      const targetGroup = sceneGroups.find((g) => g.id === sceneId);
+      if (!targetGroup || shotIndex < 0 || shotIndex >= targetGroup.shots.length) {
+        return { sourceLabel: 'Не задан' };
+      }
+
+      const shot = targetGroup.shots[shotIndex];
+
+      // 1. Explicit refusal of inheritance
+      if (shot.startFrameSourceMode === 'none') {
+        return { sourceLabel: '🚫 Без начального кадра (T2V)' };
+      }
+
+      // 2. Explicit manual upload OR start_frame reference present in shot
+      const manualRef = shot.references.find((r) => r.role === 'start_frame');
+      if (manualRef?.url) {
+        return { url: manualRef.url, sourceLabel: '📁 Загруженный начальный кадр' };
+      }
+
+      if (shot.startFrameSourceMode === 'manual_upload') {
+        return { sourceLabel: '📁 Ожидает загрузки файла' };
+      }
+
+      // 3. Custom previous shot in the scene
+      if (shot.startFrameSourceMode === 'custom_scene' && shot.startFrameSourceSceneNumber) {
+        const sourceShot = targetGroup.shots.find((s) => s.shotNumber === shot.startFrameSourceSceneNumber);
+        if (sourceShot?.extractedLastFrameUrl) {
+          return {
+            url: sourceShot.extractedLastFrameUrl,
+            sourceLabel: `Финальный кадр Шота #${sourceShot.shotNumber}`,
+          };
+        }
+        const sourceRef = sourceShot?.references.find((r) => r.role === 'end_frame' || r.role === 'start_frame');
+        if (sourceRef?.url) {
+          return { url: sourceRef.url, sourceLabel: `Кадр из Шота #${sourceShot?.shotNumber}` };
+        }
+        return { sourceLabel: `Шот #${shot.startFrameSourceSceneNumber} (рендерится...)` };
+      }
+
+      // 4. Default cascade from immediately preceding shot
+      if (shotIndex > 0) {
+        const prevShot = targetGroup.shots[shotIndex - 1];
+        if (prevShot.extractedLastFrameUrl) {
+          return {
+            url: prevShot.extractedLastFrameUrl,
+            sourceLabel: `Авто-финал видео Шота #${prevShot.shotNumber}`,
+          };
+        }
+        const endFrameRef = prevShot.references.find((r) => r.role === 'end_frame');
+        if (endFrameRef?.url) {
+          return {
+            url: endFrameRef.url,
+            sourceLabel: `End Frame Шота #${prevShot.shotNumber}`,
+          };
+        }
+        return { sourceLabel: `Ожидает завершения Шота #${prevShot.shotNumber}` };
+      }
+
+      return { sourceLabel: 'Стартовый шот сцены (T2V)' };
+    },
+
+    // Rendering Single Shot
+    renderShotById: async (sceneId, shotId) => {
+      const { sceneGroups, settings, updateShot, addLog, getResolvedStartFrameForShot } = get();
+      const targetGroup = sceneGroups.find((g) => g.id === sceneId);
+      if (!targetGroup) return;
+
+      const shotIndex = targetGroup.shots.findIndex((s) => s.id === shotId);
+      if (shotIndex === -1) return;
+
+      const shot = targetGroup.shots[shotIndex];
+      const startFrameInfo = getResolvedStartFrameForShot(sceneId, shotIndex);
+
+      updateShot(sceneId, shotId, { status: 'rendering', progress: 5, errorMessage: undefined });
+      addLog('info', 'RENDER', `🚀 Запуск генерации Шота #${shot.shotNumber} (${targetGroup.name}): ${shot.model}, ${shot.duration}s, ${shot.resolution}`);
+
+      try {
+        let finalStartFrame = startFrameInfo.url;
+
+        // Apply real-time client-side noise filter if enabled
+        if (finalStartFrame && shot.applyAntiFilterNoise) {
+          const noiseIntensity = shot.noiseStrength !== undefined ? shot.noiseStrength : 0.5;
+          addLog('info', 'CANVAS', `🛡️ Наложение анти-детект шума (${Math.round(noiseIntensity * 100)}% зернистости) на начальный кадр для обхода цензора...`);
+          try {
+            finalStartFrame = await applyNoiseToImage(finalStartFrame, noiseIntensity);
+          } catch (e) {
+            console.warn('Noise filter fallback:', e);
+          }
+        }
+
+        const submission = await submitSceneGeneration(
+          shot,
+          finalStartFrame,
+          settings.openRouterApiKey
         );
 
-        if (statusData.status === 'completed' && statusData.videoUrl) {
-          addLog(
-            'success',
-            'RENDER',
-            `🎉 Видео Сцены #${scene.sceneNumber} готово за ${elapsedSeconds} сек! URL: ${statusData.videoUrl}${
-              statusData.savedPath ? ` (Сохранено в: ${statusData.savedPath})` : ''
-            }`
-          );
-          updateScene(sceneId, {
-            status: 'completed',
-            progress: 100,
-            outputVideoUrl: statusData.videoUrl,
-            completedAt: Date.now(),
-          });
+        updateShot(sceneId, shotId, {
+          jobId: submission.jobId,
+          pollingUrl: submission.pollingUrl,
+          progress: 20,
+        });
+
+        addLog('success', 'API', `✅ Задача принята сервером! Job ID: ${submission.jobId}`);
+
+        // Polling loop
+        let attempts = 0;
+        const maxAttempts = 160;
+        let isCompleted = false;
+
+        while (attempts < maxAttempts && !isCompleted) {
+          await new Promise((res) => setTimeout(res, 4000));
+          attempts++;
 
           try {
-            const lastFrame = await extractLastFrameFromVideo(statusData.videoUrl);
-            updateScene(sceneId, { extractedLastFrameUrl: lastFrame });
-            addLog('success', 'CANVAS', `🖼️ Захвачен финальный кадр видео ➔ авто-передан в Сцену #${scene.sceneNumber + 1}`);
-          } catch (e) {
-            console.warn('Could not extract last frame:', e);
+            const statusRes = await pollSceneStatus(
+              submission.pollingUrl,
+              settings.openRouterApiKey,
+              shot.shotNumber,
+              submission.jobId
+            );
+
+            const simulatedProgress = Math.min(95, 20 + Math.floor(attempts * 2.5));
+            updateShot(sceneId, shotId, { progress: simulatedProgress });
+
+            if (statusRes.status === 'completed' && statusRes.videoUrl) {
+              isCompleted = true;
+              let finalVideoUrl = statusRes.videoUrl;
+
+              updateShot(sceneId, shotId, {
+                status: 'completed',
+                progress: 100,
+                outputVideoUrl: finalVideoUrl,
+                completedAt: Date.now(),
+              });
+
+              addLog('success', 'RENDER', `🎉 Шот #${shot.shotNumber} готов! Видео сохранено`);
+
+              // Auto-extract last frame for seamless cascading
+              if (settings.autoExtractLastFrame) {
+                try {
+                  addLog('info', 'FRAME', `Захват последнего кадра для каскадной сшивки...`);
+                  const lastFrameBase64 = await extractLastFrameFromVideo(finalVideoUrl);
+                  updateShot(sceneId, shotId, { extractedLastFrameUrl: lastFrameBase64 });
+                  addLog('success', 'FRAME', `✓ Финальный кадр захвачен ➔ авто-передан в Шот #${shot.shotNumber + 1}`);
+                } catch (frameErr) {
+                  console.warn('Frame extraction failed:', frameErr);
+                }
+              }
+              break;
+            } else if (statusRes.status === 'failed') {
+              throw new Error(statusRes.error || 'Генерация отклонена upstream-сервером ByteDance');
+            }
+          } catch (pollErr: any) {
+            console.warn(`Polling attempt ${attempts} warning:`, pollErr.message);
           }
-          return;
         }
 
-        if (statusData.status === 'failed') {
-          const errText = statusData.error || 'Ошибка генерации видео Seedance';
-          addLog('error', 'POLLING', `❌ Сервер отклонил задачу: ${errText}`);
-          throw new Error(errText);
+        if (!isCompleted) {
+          throw new Error('Превышено максимальное время ожидания генерации (таймаут)');
         }
-
-        const calculatedProgress = Math.min(95, 15 + Math.floor((attempt / 25) * 80));
-        updateScene(sceneId, { progress: calculatedProgress });
+      } catch (err: any) {
+        const errMsg = err.response?.data?.error || err.message || 'Ошибка генерации';
+        updateShot(sceneId, shotId, { status: 'failed', errorMessage: errMsg });
+        addLog('error', 'RENDER', `💥 Сбой генерации Шота #${shot.shotNumber}: ${errMsg}`);
+        throw err;
       }
+    },
 
-      throw new Error('Превышено время ожидания ответа от видео-сервера (10 минут)');
-    } catch (err: any) {
-      const errMsg = err.response?.data?.error || err.message || 'Ошибка запуска рендеринга';
-      addLog('error', 'RENDER', `💥 Сбой генерации Сцены #${scene.sceneNumber}: ${errMsg}`);
-      updateScene(sceneId, {
-        status: 'error',
-        progress: 0,
-        errorMessage: errMsg,
-      });
-      throw err;
-    }
-  },
+    startCascadeRenderForScene: async (sceneId) => {
+      const { sceneGroups, renderShotById, addLog } = get();
+      const targetGroup = sceneGroups.find((g) => g.id === sceneId);
+      if (!targetGroup) return;
 
-  startBatchCascadeRender: async () => {
-    const { scenes, renderSceneById, addLog } = get();
+      set({ isCascadeRendering: true });
+      addLog('info', 'RENDER', `🎬 Запуск сквозного каскадного рендера сцены «${targetGroup.name}» (${targetGroup.shots.length} шотов)`);
 
-    const emptyPromptIndex = scenes.findIndex((s) => !s.prompt || s.prompt.trim().length === 0);
-    if (emptyPromptIndex !== -1) {
-      alert(`Сцена #${emptyPromptIndex + 1} не имеет промпта! Заполните промпт перед каскадным запуском.`);
-      return;
-    }
+      for (let i = 0; i < targetGroup.shots.length; i++) {
+        if (!get().isCascadeRendering) break;
+        const shot = targetGroup.shots[i];
+        set({ currentRenderingShotIndex: i });
 
-    addLog('info', 'RENDER', `🎬 Запущен пакетный каскадный рендеринг проекта (${scenes.length} сцен)`);
-    set({ isCascadeRendering: true, currentRenderingSceneIndex: 0 });
-
-    try {
-      for (let i = 0; i < scenes.length; i++) {
-        const scene = get().scenes[i];
-        set({ currentRenderingSceneIndex: i });
-
-        if (!get().isCascadeRendering) {
-          addLog('warn', 'RENDER', 'Каскадный рендеринг остановлен пользователем');
+        try {
+          await renderShotById(sceneId, shot.id);
+        } catch (e) {
+          addLog('error', 'RENDER', `Каскадный рендер прерван из-за ошибки в Шоте #${shot.shotNumber}`);
           break;
         }
-
-        await renderSceneById(scene.id);
       }
-      addLog('success', 'RENDER', '✨ Все сцены проекта успешно сгенерированы!');
-    } catch (err: any) {
-      addLog('error', 'RENDER', `Каскадный рендеринг прерван из-за ошибки: ${err.message}`);
-    } finally {
+
       set({ isCascadeRendering: false });
-    }
-  },
+      addLog('success', 'RENDER', `🏁 Каскадный рендер сцены «${targetGroup.name}» завершен!`);
+    },
 
-  stopCascadeRender: () => {
-    set({ isCascadeRendering: false });
-  },
+    stopCascadeRender: () => {
+      set({ isCascadeRendering: false });
+      get().addLog('warn', 'RENDER', 'Каскадный рендер остановлен пользователем');
+    },
 
-  exportProjectJson: () => {
-    const { projectName, settings, scenes } = get();
-    const data: ProjectData = {
-      version: '1.4.0',
-      projectName,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-      settings,
-      scenes,
-    };
-    return JSON.stringify(data, null, 2);
-  },
+    // Load persisted settings & projects on app startup
+    loadPersistedSettings: () => {
+      if (typeof window === 'undefined') return;
 
-  importProjectJson: (jsonString: string) => {
-    try {
-      const data: ProjectData = JSON.parse(jsonString);
-      if (!data.scenes || !Array.isArray(data.scenes)) {
-        throw new Error('Invalid project structure');
+      const loadedProject = loadFullProjectFromStorage();
+      if (loadedProject && loadedProject.sceneGroups && loadedProject.sceneGroups.length > 0) {
+        set({
+          projectName: loadedProject.projectName || 'Новый Кино-Проект',
+          settings: loadedProject.settings || DEFAULT_SETTINGS,
+          sceneGroups: loadedProject.sceneGroups,
+          activeSceneId: loadedProject.activeSceneId || loadedProject.sceneGroups[0].id,
+        });
+        get().addLog(
+          'info',
+          'SETTINGS',
+          `Восстановлен проект "${loadedProject.projectName}" (${loadedProject.sceneGroups.length} сцен) из LocalStorage`
+        );
+        return;
       }
-      set({
-        projectName: data.projectName || 'Импортированный проект',
-        settings: { ...DEFAULT_SETTINGS, ...data.settings },
-        scenes: data.scenes,
-        selectedSceneId: data.scenes[0]?.id || null,
-      });
-      saveFullProjectToStorage(data.projectName || 'Импортированный проект', { ...DEFAULT_SETTINGS, ...data.settings }, data.scenes);
-      return true;
-    } catch (err) {
-      console.error('Failed to parse project JSON:', err);
+
+      // Settings fallback
+      try {
+        const savedSettings = localStorage.getItem(SETTINGS_STORAGE_KEY);
+        if (savedSettings) {
+          set({ settings: JSON.parse(savedSettings) });
+        }
+      } catch (e) {
+        console.warn('Could not parse saved settings', e);
+      }
+    },
+
+    exportProjectJson: () => {
+      const { projectName, settings, sceneGroups, activeSceneId } = get();
+      return JSON.stringify({ projectName, settings, sceneGroups, activeSceneId }, null, 2);
+    },
+
+    importProjectJson: (jsonString) => {
+      try {
+        const data = JSON.parse(jsonString);
+        if (data.sceneGroups && Array.isArray(data.sceneGroups)) {
+          set({
+            projectName: data.projectName || 'Импортированный проект',
+            settings: data.settings || DEFAULT_SETTINGS,
+            sceneGroups: data.sceneGroups,
+            activeSceneId: data.activeSceneId || data.sceneGroups[0]?.id,
+          });
+          saveFullProjectToStorage(data.projectName, data.settings, data.sceneGroups, data.activeSceneId);
+          get().addLog('success', 'SETTINGS', `Проект успешно импортирован!`);
+          return true;
+        }
+      } catch (e) {
+        get().addLog('error', 'SETTINGS', 'Неверный формат JSON файла проекта');
+      }
       return false;
-    }
-  },
-}));
+    },
+  };
+});

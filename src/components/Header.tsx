@@ -21,17 +21,17 @@ export const Header: React.FC = () => {
     projectName,
     setProjectName,
     settings,
-    scenes,
-    addScene,
+    sceneGroups,
+    activeSceneId,
+    addSceneGroup,
     setSettingsOpen,
     setMasterPlayerOpen,
     setLogsModalOpen,
     isCascadeRendering,
-    startBatchCascadeRender,
+    startCascadeRenderForScene,
     stopCascadeRender,
     exportProjectJson,
     importProjectJson,
-    openRouterBalanceInfo,
   } = useStudioStore();
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -61,7 +61,9 @@ export const Header: React.FC = () => {
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
-  const completedScenesCount = scenes.filter((s) => s.status === 'completed').length;
+  const allShots = sceneGroups.flatMap((g) => g.shots);
+  const completedShotsCount = allShots.filter((s) => s.status === 'completed').length;
+  const totalDuration = allShots.reduce((acc, s) => acc + s.duration, 0);
 
   return (
     <header className="h-16 border-b border-studio-700 bg-studio-900/90 backdrop-blur-md px-6 flex items-center justify-between sticky top-0 z-40">
@@ -75,10 +77,10 @@ export const Header: React.FC = () => {
             <div className="flex items-center gap-2">
               <span className="font-bold tracking-tight text-white text-base">SEEDANCE</span>
               <span className="text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded bg-studio-accent/20 text-studio-accent border border-studio-accent/30">
-                Studio
+                Studio Pro
               </span>
             </div>
-            <p className="text-[11px] text-gray-400 font-mono">ByteDance DiT & OpenRouter</p>
+            <p className="text-[11px] text-gray-400 font-mono">Director Split & Cascading</p>
           </div>
         </div>
 
@@ -94,31 +96,31 @@ export const Header: React.FC = () => {
       </div>
 
       {/* Center: Quick Stats / Scene Counter */}
-      <div className="flex items-center gap-3 bg-studio-850 px-3.5 py-1.5 rounded-full border border-studio-700">
+      <div className="hidden lg:flex items-center gap-3 bg-studio-850 px-3.5 py-1.5 rounded-full border border-studio-700">
         <div className="flex items-center gap-1.5 text-xs text-gray-300">
           <Layers className="w-3.5 h-3.5 text-studio-cyan" />
           <span>
-            Сцен: <strong className="text-white font-mono">{scenes.length}</strong>
+            Сцен: <strong className="text-white font-mono">{sceneGroups.length}</strong>
           </span>
         </div>
         <span className="text-studio-600">•</span>
         <div className="flex items-center gap-1.5 text-xs text-gray-300">
           <CheckCircle2 className="w-3.5 h-3.5 text-studio-emerald" />
           <span>
-            Готово:{' '}
+            Шотов:{' '}
             <strong className="text-white font-mono">
-              {completedScenesCount}/{scenes.length}
+              {completedShotsCount}/{allShots.length}
             </strong>
           </span>
         </div>
         <span className="text-studio-600">•</span>
         <div className="text-xs text-gray-400 font-mono">
-          Хронометраж: <span className="text-studio-cyan">{scenes.reduce((acc, s) => acc + s.duration, 0)}с</span>
+          Хронометраж: <span className="text-studio-cyan">{totalDuration}с</span>
         </div>
       </div>
 
       {/* Right: Actions */}
-      <div className="flex items-center gap-2.5">
+      <div className="flex items-center gap-2">
         {/* Balance / Key status pill */}
         <button
           onClick={() => setSettingsOpen(true)}
@@ -183,39 +185,12 @@ export const Header: React.FC = () => {
         {/* Master Film Player */}
         <button
           onClick={() => setMasterPlayerOpen(true)}
-          disabled={completedScenesCount === 0}
+          disabled={completedShotsCount === 0}
           className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-studio-700 hover:bg-studio-600 disabled:opacity-40 disabled:cursor-not-allowed text-xs font-semibold text-white border border-studio-600 shadow-sm transition-all"
         >
           <Play className="w-3.5 h-3.5 text-studio-cyan" />
           <span>Плеер Фильма</span>
         </button>
-
-        {/* Add Scene */}
-        <button
-          onClick={() => addScene()}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-studio-800 hover:bg-studio-700 text-xs font-medium text-gray-200 border border-studio-600 transition-colors"
-        >
-          <Plus className="w-3.5 h-3.5" />
-          <span>Сцена</span>
-        </button>
-
-        {/* Batch Cascade Render Button */}
-        {isCascadeRendering ? (
-          <button
-            onClick={stopCascadeRender}
-            className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg bg-studio-rose hover:bg-rose-600 text-xs font-bold text-white shadow-lg shadow-studio-rose/20 transition-all animate-pulse"
-          >
-            <span>Остановить Рендер</span>
-          </button>
-        ) : (
-          <button
-            onClick={startBatchCascadeRender}
-            className="flex items-center gap-2 px-4 py-1.5 rounded-lg bg-gradient-to-r from-studio-accent to-indigo-600 hover:from-purple-600 hover:to-indigo-500 text-xs font-bold text-white shadow-lg shadow-studio-accent/25 transition-all"
-          >
-            <Sparkles className="w-3.5 h-3.5 text-studio-cyan" />
-            <span>Каскадный Рендер</span>
-          </button>
-        )}
       </div>
     </header>
   );
