@@ -1,0 +1,86 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/sdks
+!.yarn/versions
+
+# Next.js Build Output & Cache
+.next/
+out/
+build/
+dist/
+
+# Environment Variables & Private Secrets
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+*.env
+
+# AI Agent Skills, Rules & Internal System Prompts
+.agents/
+.gemini/
+AGENTS.md
+GEMINI.md
+
+# Databases, Schemas & API Dictionaries
+database/
+*.db
+*.sqlite
+*.sqlite3
+*.sql
+docs/*_DATABASE.json
+docs/*DATABASE.json
+
+# Generated Video & Media Artifacts (Do not commit heavy binaries)
+video/
+public/videos/
+*.mp4
+*.mov
+*.avi
+*.webm
+*.mkv
+*.wav
+*.mp3
+
+# Scratch, Temp & One-Off Test Scripts
+temp/
+tmp/
+scratch/
+
+# Logs & Debugging
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# OS System Files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+Desktop.ini
+
+# IDE & Editor Settings
+.idea/
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# TypeScript & Vercel
+.vercel
+next-env.d.ts
