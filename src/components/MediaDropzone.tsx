@@ -16,6 +16,7 @@ import {
   Check,
   ZoomIn,
   Undo2,
+  Plus,
 } from 'lucide-react';
 
 interface Props {
@@ -27,6 +28,7 @@ interface Props {
   onUpdateData?: (refId: string, data: Partial<MediaReference>) => void;
   inheritedStartFrameUrl?: string;
   hasExistingStartFrame?: boolean;
+  onInsertTagToPrompt?: (tag: string) => void;
 }
 
 const ALL_ROLES: { id: MediaRole; label: string; badgeColor: string; mediaType: 'image' | 'video' | 'audio' }[] = [
@@ -46,6 +48,7 @@ export const MediaDropzone: React.FC<Props> = ({
   onUpdateData,
   inheritedStartFrameUrl,
   hasExistingStartFrame,
+  onInsertTagToPrompt,
 }) => {
   const [isDragging, setIsDragging] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
@@ -276,24 +279,41 @@ export const MediaDropzone: React.FC<Props> = ({
                     </p>
 
                     <div className="flex items-center gap-1.5 shrink-0">
-                      {/* Copy Tag Button */}
+                      {/* Insert to Prompt Button & Copy Tag */}
                       {promptTag && (
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleCopyTag(promptTag, ref.id);
-                          }}
-                          className="p-1.5 rounded-lg bg-studio-800 hover:bg-studio-750 text-gray-300 hover:text-white border border-studio-700 hover:border-studio-500 transition-colors flex items-center gap-1 text-[11px] font-mono font-bold"
-                          title={`Скопировать тег ${promptTag} для вставки в промпт`}
-                        >
-                          {isThisCopied ? (
-                            <Check className="w-3.5 h-3.5 text-studio-emerald" />
-                          ) : (
-                            <Copy className="w-3.5 h-3.5 text-studio-cyan" />
+                        <div className="flex items-center gap-1">
+                          {onInsertTagToPrompt && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onInsertTagToPrompt(promptTag);
+                              }}
+                              className="px-2 py-1.5 rounded-lg bg-studio-cyan/15 hover:bg-studio-cyan/25 text-studio-cyan border border-studio-cyan/40 hover:border-studio-cyan transition-colors flex items-center gap-1 text-[10px] font-mono font-bold shadow-sm"
+                              title={`Вставить ${promptTag} прямо в текст промпта`}
+                            >
+                              <Plus className="w-3 h-3" />
+                              <span>Вставить в промпт</span>
+                            </button>
                           )}
-                          <span className="text-[10px]">{isThisCopied ? 'Скопировано' : promptTag}</span>
-                        </button>
+
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleCopyTag(promptTag, ref.id);
+                            }}
+                            className="p-1.5 rounded-lg bg-studio-800 hover:bg-studio-750 text-gray-300 hover:text-white border border-studio-700 hover:border-studio-500 transition-colors flex items-center gap-1 text-[11px] font-mono font-bold"
+                            title={`Скопировать тег ${promptTag}`}
+                          >
+                            {isThisCopied ? (
+                              <Check className="w-3.5 h-3.5 text-studio-emerald" />
+                            ) : (
+                              <Copy className="w-3.5 h-3.5 text-studio-cyan" />
+                            )}
+                            <span className="text-[10px]">{isThisCopied ? 'Скопировано' : promptTag}</span>
+                          </button>
+                        </div>
                       )}
 
                       {/* Noise Toggle Button with Undo/Restore */}
@@ -316,7 +336,7 @@ export const MediaDropzone: React.FC<Props> = ({
                           {ref.hasNoise ? (
                             <>
                               <Undo2 className="w-3 h-3 text-amber-400" />
-                              <span>Шум: ВКЛ (Отменить)</span>
+                              <span>Шум: ВКЛ</span>
                             </>
                           ) : (
                             <>

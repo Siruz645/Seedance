@@ -25,12 +25,15 @@ interface StudioState {
   
   // Modals & UI States
   selectedShotId: string | null;
+  viewMode: 'timeline' | 'focus';
+  focusShotIndex: number;
   isMasterPlayerOpen: boolean;
   isSettingsOpen: boolean;
   isDirectorModalOpen: boolean;
   isLogsModalOpen: boolean;
   activeDirectorShotId: string | null;
   advancedSettingsModalShot: { sceneId: string; shotId: string } | null;
+  promptWorkspaceModalShot: { sceneId: string; shotId: string } | null;
   
   // Cascade Render States
   isCascadeRendering: boolean;
@@ -48,12 +51,15 @@ interface StudioState {
   setProjectName: (name: string) => void;
   updateSettings: (settings: Partial<StudioSettings>) => void;
   setBalanceInfo: (info: any) => void;
+  setViewMode: (mode: 'timeline' | 'focus') => void;
+  setFocusShotIndex: (index: number) => void;
   setSelectedShotId: (id: string | null) => void;
   setMasterPlayerOpen: (open: boolean) => void;
   setSettingsOpen: (open: boolean) => void;
   setDirectorModalOpen: (open: boolean, shotId?: string) => void;
   setLogsModalOpen: (open: boolean) => void;
   setAdvancedSettingsModalShot: (data: { sceneId: string; shotId: string } | null) => void;
+  setPromptWorkspaceModalShot: (data: { sceneId: string; shotId: string } | null) => void;
   addLog: (level: LogEntry['level'], category: LogEntry['category'], message: string, details?: any) => void;
   clearLogs: () => void;
 
@@ -262,12 +268,15 @@ export const useStudioStore = create<StudioState>((set, get) => {
     sceneGroups: [initialGroup],
     activeSceneId: initialGroup.id,
     selectedShotId: null,
+    viewMode: 'timeline',
+    focusShotIndex: 0,
     isMasterPlayerOpen: false,
     isSettingsOpen: false,
     isDirectorModalOpen: false,
     isLogsModalOpen: false,
     activeDirectorShotId: null,
     advancedSettingsModalShot: null,
+    promptWorkspaceModalShot: null,
     isCascadeRendering: false,
     currentRenderingShotIndex: 0,
     openRouterBalanceInfo: null,
@@ -301,6 +310,8 @@ export const useStudioStore = create<StudioState>((set, get) => {
     },
 
     setBalanceInfo: (info) => set({ openRouterBalanceInfo: info }),
+    setViewMode: (mode) => set({ viewMode: mode }),
+    setFocusShotIndex: (index) => set({ focusShotIndex: index }),
     setSelectedShotId: (id) => set({ selectedShotId: id }),
     setMasterPlayerOpen: (open) => set({ isMasterPlayerOpen: open }),
     setSettingsOpen: (open) => set({ isSettingsOpen: open }),
@@ -308,6 +319,7 @@ export const useStudioStore = create<StudioState>((set, get) => {
       set({ isDirectorModalOpen: open, activeDirectorShotId: shotId || null }),
     setLogsModalOpen: (open) => set({ isLogsModalOpen: open }),
     setAdvancedSettingsModalShot: (data) => set({ advancedSettingsModalShot: data }),
+    setPromptWorkspaceModalShot: (data) => set({ promptWorkspaceModalShot: data }),
 
     addLog: (level, category, message, details) => {
       const entry: LogEntry = {

@@ -14,6 +14,7 @@ import { MediaDropzone } from './MediaDropzone';
 import { ImagePreviewModal } from './ImagePreviewModal';
 import { AspectRatioPicker } from './AspectRatioPicker';
 import { CameraMotionDropdown } from './CameraMotionDropdown';
+import { PromptEditorWithMentions } from './PromptEditorWithMentions';
 import {
   Sparkles,
   Play,
@@ -31,6 +32,7 @@ import {
   Settings,
   Link,
   Undo2,
+  Maximize2,
 } from 'lucide-react';
 
 interface Props {
@@ -38,6 +40,7 @@ interface Props {
   shot: Shot;
   shotIndex: number;
   totalShots: number;
+  isFullScreenFocus?: boolean;
 }
 
 const SEEDANCE_MODELS: {
@@ -84,7 +87,7 @@ const SEEDANCE_MODELS: {
   },
 ];
 
-export const ShotCard: React.FC<Props> = ({ sceneId, shot, shotIndex }) => {
+export const ShotCard: React.FC<Props> = ({ sceneId, shot, shotIndex, totalShots, isFullScreenFocus }) => {
   const {
     sceneGroups,
     settings,
@@ -102,6 +105,7 @@ export const ShotCard: React.FC<Props> = ({ sceneId, shot, shotIndex }) => {
     renderShotById,
     setDirectorModalOpen,
     setAdvancedSettingsModalShot,
+    setPromptWorkspaceModalShot,
   } = useStudioStore();
 
   const [previewImage, setPreviewImage] = useState<{ url: string; title: string } | null>(null);
@@ -183,7 +187,11 @@ export const ShotCard: React.FC<Props> = ({ sceneId, shot, shotIndex }) => {
 
   return (
     <div
-      className={`w-[660px] shrink-0 rounded-2xl bg-studio-900 border flex flex-col shadow-xl transition-all ${
+      className={`${
+        isFullScreenFocus
+          ? 'w-full h-full rounded-2xl bg-studio-900 border flex flex-col shadow-2xl overflow-hidden'
+          : 'w-[660px] h-[calc(100vh-210px)] shrink-0 rounded-2xl bg-studio-900 border flex flex-col shadow-xl overflow-hidden'
+      } transition-all ${
         shot.status === 'rendering'
           ? 'border-studio-accent ring-2 ring-studio-accent/30 shadow-2xl shadow-studio-accent/20'
           : shot.status === 'completed'
@@ -192,7 +200,7 @@ export const ShotCard: React.FC<Props> = ({ sceneId, shot, shotIndex }) => {
       }`}
     >
       {/* Top Header */}
-      <div className="p-3 border-b border-studio-800 flex items-center justify-between bg-studio-950/60 rounded-t-2xl">
+      <div className="p-3 border-b border-studio-800 flex items-center justify-between bg-studio-950/60 rounded-t-2xl shrink-0">
         <div className="flex items-center gap-2.5">
           <div className="w-7 h-7 rounded-lg bg-studio-accent/20 border border-studio-accent/40 flex items-center justify-center font-bold text-xs text-studio-cyan font-mono shadow-inner">
             #{shot.shotNumber}
@@ -230,27 +238,33 @@ export const ShotCard: React.FC<Props> = ({ sceneId, shot, shotIndex }) => {
           <button
             type="button"
             onClick={() => duplicateShot(sceneId, shot.id)}
-            className="p-1 rounded-md text-gray-400 hover:text-white hover:bg-studio-800 transition-colors"
+            className="p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-studio-800 transition-colors"
             title="Дублировать шот"
           >
             <Copy className="w-3.5 h-3.5" />
           </button>
 
-          <button
-            type="button"
-            onClick={() => removeShot(sceneId, shot.id)}
-            className="p-1 rounded-md text-gray-400 hover:text-rose-400 hover:bg-studio-800 transition-colors"
-            title="Удалить шот"
-          >
-            <Trash2 className="w-3.5 h-3.5" />
-          </button>
+          {totalShots > 1 && (
+            <button
+              type="button"
+              onClick={() => {
+                if (confirm(`Удалить шот #${shot.shotNumber}?`)) {
+                  removeShot(sceneId, shot.id);
+                }
+              }}
+              className="p-1.5 rounded-lg text-gray-400 hover:text-rose-400 hover:bg-studio-800 transition-colors"
+              title="Удалить шот"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+            </button>
+          )}
         </div>
       </div>
 
       {/* Main Director Split Body */}
-      <div className="p-3.5 grid grid-cols-1 md:grid-cols-12 gap-3.5 flex-1">
+      <div className="p-3.5 grid grid-cols-1 md:grid-cols-12 gap-3.5 flex-1 min-h-0 overflow-hidden">
         {/* LEFT COLUMN (8 cols): 1. Showcase Video/Keyframe -> 2. PROMPT -> 3. REFERENCES */}
-        <div className="md:col-span-8 space-y-3.5 flex flex-col justify-between">
+        <div className="md:col-span-8 space-y-3.5 overflow-y-auto custom-scrollbar pr-1.5 h-full">
           {/* 1. Large Keyframe Showcase / Video Player */}
           {shot.outputVideoUrl ? (
             <div className="space-y-2">
@@ -391,7 +405,7 @@ export const ShotCard: React.FC<Props> = ({ sceneId, shot, shotIndex }) => {
                             : 'bg-studio-800 text-gray-300 border-studio-700 hover:text-white'
                         }`}
                       >
-                        {endFrameRef.hasNoise ? 'Шум: ВКЛ (Отменить)' : '+ Шум 50%'}
+                        {endFrameRef.hasNoise ? 'Шум: ВКЛ' : '+ Шум 50%'}
                       </button>
                     </div>
                   </div>
@@ -406,24 +420,36 @@ export const ShotCard: React.FC<Props> = ({ sceneId, shot, shotIndex }) => {
               <label className="text-[10px] font-bold text-gray-300 uppercase tracking-wider flex items-center gap-1.5">
                 <span>Промпт динамики и соматики</span>
               </label>
-              {settings.enableAiDirector && (
+              <div className="flex items-center gap-1.5">
                 <button
                   type="button"
-                  onClick={() => setDirectorModalOpen(true, shot.id)}
-                  className="flex items-center gap-1 text-[11px] font-bold text-studio-cyan hover:text-cyan-300 transition-colors"
+                  onClick={() => setPromptWorkspaceModalShot({ sceneId, shotId: shot.id })}
+                  className="flex items-center gap-1 text-[10px] font-semibold text-gray-300 hover:text-white bg-studio-800 hover:bg-studio-750 px-2 py-0.5 rounded-md border border-studio-700 hover:border-studio-cyan transition-all"
+                  title="Открыть полноэкранный редактор на 90% экрана"
                 >
-                  <Sparkles className="w-3 h-3" />
-                  <span>✨ AI Режиссер</span>
+                  <Maximize2 className="w-3 h-3 text-studio-cyan" />
+                  <span>На весь экран</span>
                 </button>
-              )}
+                {settings.enableAiDirector && (
+                  <button
+                    type="button"
+                    onClick={() => setDirectorModalOpen(true, shot.id)}
+                    className="flex items-center gap-1 text-[11px] font-bold text-studio-cyan hover:text-cyan-300 transition-colors"
+                  >
+                    <Sparkles className="w-3 h-3" />
+                    <span>✨ AI Режиссер</span>
+                  </button>
+                )}
+              </div>
             </div>
 
-            <textarea
+            <PromptEditorWithMentions
               value={shot.prompt}
-              onChange={(e) => updateShot(sceneId, shot.id, { prompt: e.target.value })}
-              placeholder="Опишите непрерывное действие персонажа, соматику (мимика, дыхание, моргание) и динамику кадра..."
+              onChange={(val) => updateShot(sceneId, shot.id, { prompt: val })}
+              references={shot.references}
+              placeholder="Опишите непрерывное действие персонажа, соматику или наберите @ для выбора нужного референса..."
               rows={3}
-              className={`w-full rounded-xl p-2.5 text-xs text-gray-200 placeholder-gray-500 focus:outline-none transition-all resize-y min-h-[70px] max-h-[180px] ${
+              className={`w-full rounded-xl p-2.5 text-xs text-gray-200 placeholder-gray-500 focus:outline-none transition-colors leading-relaxed ${
                 isPromptEmpty
                   ? 'bg-rose-950/10 border border-rose-500/50 focus:border-rose-400'
                   : 'bg-studio-850 border border-studio-750 focus:border-studio-accent'
@@ -449,6 +475,11 @@ export const ShotCard: React.FC<Props> = ({ sceneId, shot, shotIndex }) => {
             <MediaDropzone
               references={shot.references}
               hasExistingStartFrame={hasStartFrame || (shot.shotNumber > 1 && shot.startFrameSourceMode === 'previous_scene')}
+              onInsertTagToPrompt={(tag) => {
+                updateShot(sceneId, shot.id, {
+                  prompt: (shot.prompt ? shot.prompt + ' ' : '') + tag,
+                });
+              }}
               onAddReference={(ref) => addReferenceToShot(sceneId, shot.id, ref)}
               onRemoveReference={(refId) => removeReferenceFromShot(sceneId, shot.id, refId)}
               onUpdateRole={(refId, role) => updateReferenceRole(sceneId, shot.id, refId, role)}
@@ -459,7 +490,7 @@ export const ShotCard: React.FC<Props> = ({ sceneId, shot, shotIndex }) => {
         </div>
 
         {/* RIGHT COLUMN (HUD / Technical Panel - 4 cols) */}
-        <div className="md:col-span-4 bg-studio-950/70 border border-studio-800 rounded-xl p-3 flex flex-col justify-between space-y-3">
+        <div className="md:col-span-4 bg-studio-950/70 border border-studio-800 rounded-xl p-3 flex flex-col justify-between space-y-3 overflow-y-auto custom-scrollbar h-full">
           <div className="space-y-3 text-xs">
             <div className="flex items-center justify-between border-b border-studio-800/80 pb-2">
               <span className="text-[11px] font-bold text-gray-300 uppercase tracking-wider flex items-center gap-1">

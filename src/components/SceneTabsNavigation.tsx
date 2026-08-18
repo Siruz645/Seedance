@@ -27,6 +27,8 @@ export const SceneTabsNavigation: React.FC = () => {
     addShotToScene,
     startCascadeRenderForScene,
     isCascadeRendering,
+    viewMode,
+    setViewMode,
   } = useStudioStore();
 
   const [editingSceneId, setEditingSceneId] = useState<string | null>(null);
@@ -170,8 +172,38 @@ export const SceneTabsNavigation: React.FC = () => {
         </button>
       </div>
 
-      {/* Right: Active Scene Operations (Add Shot & Cascade Render) */}
+      {/* Right: View Mode Toggle, Add Shot & Cascade Render */}
       <div className="flex items-center gap-2 shrink-0 justify-end">
+        {/* View Mode Toggle: [ 🎞️ Лента | 🔍 Фокус (90%) ] */}
+        <div className="flex items-center bg-studio-950/80 p-0.5 rounded-xl border border-studio-750">
+          <button
+            type="button"
+            onClick={() => setViewMode('timeline')}
+            className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold transition-all ${
+              viewMode === 'timeline'
+                ? 'bg-studio-accent text-white shadow-sm font-bold'
+                : 'text-gray-400 hover:text-white'
+            }`}
+            title="Горизонтальная каскадная лента карточек"
+          >
+            <Layers className="w-3.5 h-3.5" />
+            <span>Лента</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setViewMode('focus')}
+            className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold transition-all ${
+              viewMode === 'focus'
+                ? 'bg-studio-accent text-white shadow-sm font-bold'
+                : 'text-gray-400 hover:text-white'
+            }`}
+            title="Полноэкранный фокус-режим (90% ширины)"
+          >
+            <Sparkles className="w-3.5 h-3.5" />
+            <span>Фокус 90%</span>
+          </button>
+        </div>
+
         <button
           type="button"
           onClick={() => addShotToScene(activeSceneId)}
