@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useRef } from 'react';
+import React, { useRef, useEffect } from 'react';
 import { useStudioStore } from '@/lib/projectStore';
 import { ShotCard } from './ShotCard';
 import {
@@ -20,6 +20,8 @@ export const StoryboardTimeline: React.FC = () => {
     viewMode,
     focusShotIndex,
     setFocusShotIndex,
+    lastCreatedShotId,
+    setLastCreatedShotId,
   } = useStudioStore();
 
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -29,6 +31,23 @@ export const StoryboardTimeline: React.FC = () => {
 
   const currentFocusIndex = Math.max(0, Math.min(shots.length - 1, focusShotIndex));
   const currentFocusShot = shots[currentFocusIndex] || shots[0];
+
+  // Auto-scroll to newly created or duplicated shot
+  useEffect(() => {
+    if (lastCreatedShotId) {
+      const el = document.getElementById(`shot-card-${lastCreatedShotId}`);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+        setLastCreatedShotId(null);
+      } else if (scrollContainerRef.current) {
+        scrollContainerRef.current.scrollTo({
+          left: scrollContainerRef.current.scrollWidth,
+          behavior: 'smooth',
+        });
+        setLastCreatedShotId(null);
+      }
+    }
+  }, [lastCreatedShotId, shots.length, setLastCreatedShotId]);
 
   return (
     <div className="flex-1 overflow-hidden w-full h-full flex flex-col">
@@ -112,13 +131,15 @@ export const StoryboardTimeline: React.FC = () => {
           <div className="flex items-start gap-6 min-w-max pb-6 pt-1 h-full">
             {shots.map((shot, index) => (
               <React.Fragment key={shot.id}>
-                {/* Shot Card */}
-                <ShotCard
-                  sceneId={activeGroup.id}
-                  shot={shot}
-                  shotIndex={index}
-                  totalShots={shots.length}
-                />
+                {/* Shot Card Wrapper with DOM ID for smooth autoscrolling */}
+                <div id={`shot-card-${shot.id}`} className="h-full flex shrink-0">
+                  <ShotCard
+                    sceneId={activeGroup.id}
+                    shot={shot}
+                    shotIndex={index}
+                    totalShots={shots.length}
+                  />
+                </div>
 
                 {/* Inter-Shot Dynamic SVG Cascade Connector */}
                 {index < shots.length - 1 && (

@@ -25,6 +25,7 @@ interface StudioState {
   
   // Modals & UI States
   selectedShotId: string | null;
+  lastCreatedShotId: string | null;
   viewMode: 'timeline' | 'focus';
   focusShotIndex: number;
   isMasterPlayerOpen: boolean;
@@ -54,6 +55,7 @@ interface StudioState {
   setViewMode: (mode: 'timeline' | 'focus') => void;
   setFocusShotIndex: (index: number) => void;
   setSelectedShotId: (id: string | null) => void;
+  setLastCreatedShotId: (id: string | null) => void;
   setMasterPlayerOpen: (open: boolean) => void;
   setSettingsOpen: (open: boolean) => void;
   setDirectorModalOpen: (open: boolean, shotId?: string) => void;
@@ -84,6 +86,13 @@ interface StudioState {
   updateReferenceUrl: (sceneId: string, shotId: string, refId: string, url: string) => void;
   updateReferenceData: (sceneId: string, shotId: string, refId: string, data: Partial<MediaReference>) => void;
   copyReferencesFromShot: (sceneId: string, targetShotId: string, sourceShotNumber: number) => void;
+  getProjectReferencesPool: (
+    currentSceneId: string,
+    currentShotId: string
+  ) => {
+    currentShotRefs: MediaReference[];
+    otherRefs: { ref: MediaReference; sourceSceneName: string; sourceShotNumber: number }[];
+  };
 
   // Keyframe Source Selection
   setStartFrameSource: (sceneId: string, shotId: string, mode: StartFrameSourceMode, targetShotNumber?: number) => void;
@@ -268,6 +277,7 @@ export const useStudioStore = create<StudioState>((set, get) => {
     sceneGroups: [initialGroup],
     activeSceneId: initialGroup.id,
     selectedShotId: null,
+    lastCreatedShotId: null,
     viewMode: 'timeline',
     focusShotIndex: 0,
     isMasterPlayerOpen: false,
@@ -313,6 +323,7 @@ export const useStudioStore = create<StudioState>((set, get) => {
     setViewMode: (mode) => set({ viewMode: mode }),
     setFocusShotIndex: (index) => set({ focusShotIndex: index }),
     setSelectedShotId: (id) => set({ selectedShotId: id }),
+    setLastCreatedShotId: (id) => set({ lastCreatedShotId: id }),
     setMasterPlayerOpen: (open) => set({ isMasterPlayerOpen: open }),
     setSettingsOpen: (open) => set({ isSettingsOpen: open }),
     setDirectorModalOpen: (open, shotId) =>
@@ -447,7 +458,13 @@ export const useStudioStore = create<StudioState>((set, get) => {
         g.id === sceneId ? { ...g, shots: reindexedShots } : g
       );
 
-      set({ sceneGroups: updatedGroups });
+      const isFocus = get().viewMode === 'focus';
+      set({
+        sceneGroups: updatedGroups,
+        lastCreatedShotId: newShot.id,
+        selectedShotId: newShot.id,
+        ...(isFocus ? { focusShotIndex: insertIndex } : {}),
+      });
       saveFullProjectToStorage(projectName, settings, updatedGroups, activeSceneId);
       get().addLog('info', 'SETTINGS', `Добавлен Шот #${insertIndex + 1} в ${targetGroup.name}`);
     },
@@ -509,7 +526,13 @@ export const useStudioStore = create<StudioState>((set, get) => {
         g.id === sceneId ? { ...g, shots: reindexedShots } : g
       );
 
-      set({ sceneGroups: updatedGroups });
+      const isFocus = get().viewMode === 'focus';
+      set({
+        sceneGroups: updatedGroups,
+        lastCreatedShotId: clonedShot.id,
+        selectedShotId: clonedShot.id,
+        ...(isFocus ? { focusShotIndex: sourceIndex + 1 } : {}),
+      });
       saveFullProjectToStorage(projectName, settings, updatedGroups, activeSceneId);
       get().addLog('info', 'SETTINGS', `Шот продублирован`);
     },
@@ -712,6 +735,42 @@ export const useStudioStore = create<StudioState>((set, get) => {
       set({ sceneGroups: updatedGroups });
       saveFullProjectToStorage(projectName, settings, updatedGroups, activeSceneId);
       addLog('success', 'SETTINGS', `Скопировано ${refsToCopy.length} референсов из Шота #${sourceShotNumber}`);
+    },
+
+    getProjectReferencesPool: (currentSceneId, currentShotId) => {
+      const { sceneGroups } = get();
+      let currentShotRefs: MediaReference[] = [];
+      const otherRefs: { ref: MediaReference; sourceSceneName: string; sourceShotNumber: number }[] = [];
+      const seenUrls = new Set<string>();
+
+      // 1. First collect current shot references
+      for (const group of sceneGroups) {
+        for (const shot of group.shots) {
+          if (group.id === currentSceneId && shot.id === currentShotId) {
+            currentShotRefs = shot.references || [];
+            currentShotRefs.forEach((r) => seenUrls.add(r.url));
+          }
+        }
+      }
+
+      // 2. Then collect all other references across all shots and scenes
+      for (const group of sceneGroups) {
+        for (const shot of group.shots) {
+          if (group.id === currentSceneId && shot.id === currentShotId) continue;
+          for (const ref of shot.references || []) {
+            if (!seenUrls.has(ref.url)) {
+              seenUrls.add(ref.url);
+              otherRefs.push({
+                ref,
+                sourceSceneName: group.name,
+                sourceShotNumber: shot.shotNumber,
+              });
+            }
+          }
+        }
+      }
+
+      return { currentShotRefs, otherRefs };
     },
 
     setStartFrameSource: (sceneId, shotId, mode, targetShotNumber) => {

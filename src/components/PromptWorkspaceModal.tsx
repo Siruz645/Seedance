@@ -151,6 +151,8 @@ export const PromptWorkspaceModal: React.FC = () => {
                 <PromptEditorWithMentions
                   value={shot.prompt}
                   onChange={(val) => updateShot(sceneId, shot.id, { prompt: val })}
+                  sceneId={sceneId}
+                  shotId={shot.id}
                   references={shot.references}
                   placeholder="Опишите детально непрерывное действие персонажа, соматику или наберите @ для выбора нужного референса..."
                   className="w-full h-full flex-1 rounded-2xl bg-studio-900/90 border border-studio-750 p-4 text-sm text-gray-100 placeholder-gray-500 focus:outline-none focus:border-studio-cyan focus:ring-1 focus:ring-studio-cyan transition-all resize-none leading-relaxed font-sans"
@@ -193,7 +195,11 @@ export const PromptWorkspaceModal: React.FC = () => {
               </div>
 
               <MediaDropzone
+                sceneId={sceneId}
+                shotId={shot.id}
                 references={shot.references}
+                isLargeLayout={true}
+                showCrossShotPool={true}
                 hasExistingStartFrame={shot.startFrameSourceMode !== 'none'}
                 onInsertTagToPrompt={insertTextAtCursor}
                 onAddReference={(ref) => addReferenceToShot(sceneId, shot.id, ref)}

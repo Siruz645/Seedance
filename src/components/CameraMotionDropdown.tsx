@@ -56,11 +56,7 @@ export const CameraMotionDropdown: React.FC<Props> = ({ value, onChange }) => {
   }, [isOpen]);
 
   return (
-    <div className="relative" ref={containerRef}>
-      <label className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider block mb-1">
-        Вектор камеры
-      </label>
-
+    <div className="relative w-full" ref={containerRef}>
       {/* Trigger Button */}
       <button
         type="button"

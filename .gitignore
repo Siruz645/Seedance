@@ -84,3 +84,5 @@ Desktop.ini
 # TypeScript & Vercel
 .vercel
 next-env.d.ts
+CHANGELOG.md
+check.bat
